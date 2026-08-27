@@ -14,6 +14,13 @@
 extern uint8_t kb_aml_threshold;
 #endif
 
+// レイヤー切替通知LED演出: 切り替わった瞬間だけ一時的に光らせる
+#define LAYER_FLASH_MS 200
+static bool     g_layer_flash_active = false;
+static uint16_t g_layer_flash_timer = 0;
+static uint8_t  g_layer_flash_saved_mode;
+static uint8_t  g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val;
+
 #ifdef GESTURE_ENABLE
 // ジェスチャー: ホールド中のトラックボール移動を累積し方向で判定して送出。
 // タップ（短押し）時は gesture_tap に設定した通常キーを送る兼用キー。
@@ -188,6 +195,23 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
 
 layer_state_t layer_state_set_user(layer_state_t state) {
     uint8_t hl = get_highest_layer(state);
+
+    // レイヤー切替通知LED演出: 切り替わった瞬間だけ一時的に光らせる
+    static uint8_t last_layer_for_flash = 0;
+    if (hl != last_layer_for_flash) {
+        last_layer_for_flash = hl;
+        if (!g_layer_flash_active) {
+            g_layer_flash_saved_mode = rgblight_get_mode();
+            g_layer_flash_saved_hue  = rgblight_get_hue();
+            g_layer_flash_saved_sat  = rgblight_get_sat();
+            g_layer_flash_saved_val  = rgblight_get_val();
+        }
+        g_layer_flash_active = true;
+        g_layer_flash_timer  = timer_read();
+        rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
+        rgblight_sethsv_noeeprom((uint16_t)hl * 32, 255, 255);
+    }
+
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）
 #ifdef GESTURE_ENABLE
     g_gesture_layer_on = (kb_gesture_layer_get() == hl);   // 設定レイヤーでジェスチャー
@@ -200,9 +224,16 @@ layer_state_t layer_state_set_user(layer_state_t state) {
     return state;
 }
 
-#ifdef GESTURE_ENABLE
-// ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定
 void matrix_scan_user(void) {
+    // レイヤー切替通知LED演出: 一定時間経過したら元の光り方に戻す
+    if (g_layer_flash_active && timer_elapsed(g_layer_flash_timer) > LAYER_FLASH_MS) {
+        rgblight_mode_noeeprom(g_layer_flash_saved_mode);
+        rgblight_sethsv_noeeprom(g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val);
+        g_layer_flash_active = false;
+    }
+
+#ifdef GESTURE_ENABLE
+    // ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定
     if (g_gesture_pending) {
         uint16_t tt = kb_settings_get().tapping_term;
         if (tt < 50 || tt > 1000) tt = TAPPING_TERM;
@@ -211,8 +242,8 @@ void matrix_scan_user(void) {
             g_gesture_pending = false;
         }
     }
-}
 #endif
+}
 
 // スクロール方向の反転（EEPROM設定に応じて符号を反転）
 report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {

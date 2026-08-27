@@ -45,6 +45,7 @@ void kb_settings_set(const kb_settings_t *s);
 #define KB_GESTURE_LAYER_EEPROM  0x03E1  // ジェスチャーレイヤー保存先
 #define KB_GESTURE_TH_H_EEPROM  0x03E2  // ジェスチャー横方向しきい値保存先
 #define KB_GESTURE_TH_V_EEPROM  0x03E3  // ジェスチャー縦方向しきい値保存先
+#define KB_PRECISION_DIV_EEPROM 0x03E4  // 超低速モードの分周値保存先
 #define KB_LAYER_NONE            0xFE    // 「なし」を表す値（0xFF=未初期化と区別）
 
 // スクロールレイヤー（0-7=そのレイヤーでスクロール / KB_LAYER_NONE=無効。既定3）
@@ -66,3 +67,10 @@ void    kb_gesture_th_h_set(uint8_t v);
 uint8_t kb_gesture_th_v_get(void);
 void    kb_gesture_th_v_set(uint8_t v);
 #endif
+
+// 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-20）
+#define KB_PRECISION_DIV_DEFAULT 4
+#define KB_PRECISION_DIV_MIN     2
+#define KB_PRECISION_DIV_MAX     20
+uint8_t kb_precision_div_get(void);
+void    kb_precision_div_set(uint8_t v);

@@ -29,6 +29,8 @@
 #define KB_HID_CMD_GET_GESTURE    0x15  // ジェスチャー設定取得（GESTURE_ENABLE時のみ応答）
 #define KB_HID_CMD_SET_GESTURE    0x16  // ジェスチャー設定変更（GESTURE_ENABLE時のみ応答）
 #define KB_HID_CMD_GET_VERSION    0x17  // ファームウェアのバージョン取得（major.minor.patch）
+#define KB_HID_CMD_GET_PRECISION  0x18  // 超低速モードのCPI分周値取得
+#define KB_HID_CMD_SET_PRECISION  0x19  // 超低速モードのCPI分周値変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00

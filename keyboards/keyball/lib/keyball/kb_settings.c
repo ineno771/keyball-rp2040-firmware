@@ -122,3 +122,22 @@ void kb_gesture_th_v_set(uint8_t v) {
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_TH_V_EEPROM, g_gesture_th_v);
 }
 #endif
+
+// ── 超低速モードのCPI分周値（同上パターン）──────────────────────────
+static uint8_t g_precision_div        = 0xEE;
+static bool    g_precision_div_loaded = false;
+
+uint8_t kb_precision_div_get(void) {
+    if (!g_precision_div_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_PRECISION_DIV_EEPROM);
+        g_precision_div = (v >= KB_PRECISION_DIV_MIN && v <= KB_PRECISION_DIV_MAX) ? v : KB_PRECISION_DIV_DEFAULT;
+        g_precision_div_loaded = true;
+    }
+    return g_precision_div;
+}
+
+void kb_precision_div_set(uint8_t v) {
+    g_precision_div = (v >= KB_PRECISION_DIV_MIN && v <= KB_PRECISION_DIV_MAX) ? v : KB_PRECISION_DIV_DEFAULT;
+    g_precision_div_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_PRECISION_DIV_EEPROM, g_precision_div);
+}

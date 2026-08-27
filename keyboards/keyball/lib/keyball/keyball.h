@@ -126,6 +126,9 @@ enum keyball_keycodes {
     // ジェスチャー: 押している間トラックボールを上下左右に振るとキー送出
     GST_HOLD = QK_KB_16,
 
+    // 超低速（精密作業）モード: 押している間だけCPIを下げる
+    PRC_MO   = QK_KB_17,
+
     // User customizable 32 keycodes.
     KEYBALL_SAFE_RANGE = QK_USER_0,
 };

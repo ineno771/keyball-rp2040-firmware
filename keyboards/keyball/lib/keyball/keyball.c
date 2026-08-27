@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #endif
 
 #include "keyball.h"
+#include "kb_settings.h"
 #include "drivers/pmw3360/pmw3360.h"
 
 #include <string.h>
@@ -716,6 +717,25 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
             // process_auto_mouse may use this in future, if changed order of
             // processes.
             return true;
+
+        case PRC_MO: {
+            // 超低速（精密作業）モード: 押している間だけCPIを分周値で割る
+            static uint8_t precision_saved_cpi = 0;
+            static bool    precision_active    = false;
+            if (record->event.pressed) {
+                if (!precision_active) {
+                    precision_saved_cpi = keyball_get_cpi();
+                    uint8_t div = kb_precision_div_get();
+                    uint8_t v   = precision_saved_cpi / div;
+                    keyball_set_cpi(v < 1 ? 1 : v);
+                    precision_active = true;
+                }
+            } else if (precision_active) {
+                keyball_set_cpi(precision_saved_cpi);
+                precision_active = false;
+            }
+            return true;
+        }
     }
 
     // process events which works on pressed only.
