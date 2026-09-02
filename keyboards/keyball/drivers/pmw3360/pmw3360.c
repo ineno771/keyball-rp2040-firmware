@@ -147,7 +147,15 @@ bool pmw3360_init(void) {
     spi_init();
     setPinOutput(PMW3360_NCS_PIN);
     // reboot
-    pmw3360_spi_start();
+    //
+    // 注意: ここで pmw3360_spi_start() を呼んではいけない。
+    // pmw3360_reg_write()/pmw3360_reg_read() は呼び出しごとに自前で
+    // spi_start()/spi_stop() のペアを完結させるため、ここで先にバスを
+    // 開始すると二重にロックを取ろうとする形になる。AVR版のspi_start()は
+    // レジスタ設定を再実行するだけなので実害がなかったが、ChibiOS(RP2040)版の
+    // spi_start()はOSの排他ロック(ミューテックス)を取得するため、
+    // 既に自分が保持しているロックをもう一度取ろうとして無限に待ち続け、
+    // メインループ全体が止まってしまう(実機で確認済み)。
     pmw3360_reg_write(pmw3360_Power_Up_Reset, 0x5a);
     wait_ms(50);
     // read five registers of motion and discard those values
@@ -161,7 +169,6 @@ bool pmw3360_init(void) {
     // check product ID and revision ID
     uint8_t pid = pmw3360_reg_read(pmw3360_Product_ID);
     uint8_t rev = pmw3360_reg_read(pmw3360_Revision_ID);
-    spi_stop();
     return pid == 0x42 && rev == 0x01;
 }
 

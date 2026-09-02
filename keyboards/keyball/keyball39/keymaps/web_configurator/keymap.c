@@ -15,11 +15,13 @@ extern uint8_t kb_aml_threshold;
 #endif
 
 // レイヤー切替通知LED演出: 切り替わった瞬間だけ一時的に光らせる
+#ifdef RGBLIGHT_ENABLE
 #define LAYER_FLASH_MS 200
 static bool     g_layer_flash_active = false;
 static uint16_t g_layer_flash_timer = 0;
 static uint8_t  g_layer_flash_saved_mode;
 static uint8_t  g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val;
+#endif
 
 #ifdef GESTURE_ENABLE
 // ジェスチャー: ホールド中のトラックボール移動を累積し方向で判定して送出。
@@ -200,6 +202,7 @@ layer_state_t layer_state_set_user(layer_state_t state) {
     static uint8_t last_layer_for_flash = 0;
     if (hl != last_layer_for_flash) {
         last_layer_for_flash = hl;
+#ifdef RGBLIGHT_ENABLE
         if (!g_layer_flash_active) {
             g_layer_flash_saved_mode = rgblight_get_mode();
             g_layer_flash_saved_hue  = rgblight_get_hue();
@@ -210,6 +213,7 @@ layer_state_t layer_state_set_user(layer_state_t state) {
         g_layer_flash_timer  = timer_read();
         rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
         rgblight_sethsv_noeeprom((uint16_t)hl * 32, 255, 255);
+#endif
     }
 
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）
@@ -225,12 +229,14 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 
 void matrix_scan_user(void) {
+#ifdef RGBLIGHT_ENABLE
     // レイヤー切替通知LED演出: 一定時間経過したら元の光り方に戻す
     if (g_layer_flash_active && timer_elapsed(g_layer_flash_timer) > LAYER_FLASH_MS) {
         rgblight_mode_noeeprom(g_layer_flash_saved_mode);
         rgblight_sethsv_noeeprom(g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val);
         g_layer_flash_active = false;
     }
+#endif
 
 #ifdef GESTURE_ENABLE
     // ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定

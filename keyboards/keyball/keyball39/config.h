@@ -42,6 +42,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define SPLIT_TRANSACTION_IDS_KB KEYBALL_GET_INFO, KEYBALL_GET_MOTION, KEYBALL_SET_CPI
 
+// トラックボールセンサー(PMW3360)用SPI。
+// このボード(QMK_PM2040コンバーター)のデフォルトも同じB1/B2/B3だが、
+// 本基板の配線(Pro Micro互換ピン配置)に依存していることを明示するため
+// あえて明記しておく。
+#define SPI_SCK_PIN          B1
+#define SPI_MOSI_PIN         B2
+#define SPI_MISO_PIN         B3
+
 // RGB LED settings
 #define WS2812_DI_PIN       D3
 #ifdef RGBLIGHT_ENABLE
