@@ -7,8 +7,10 @@
 // これによりユーザーが手動でplistを編集する必要がなくなる
 #define USB_HID_KEYBOARD_COUNTRY_CODE 15
 
-// Dynamic keymapのレイヤー数（4レイヤー固定）
-#define DYNAMIC_KEYMAP_LAYER_COUNT 4
+// Dynamic keymapのレイヤー数。
+// RP2040は大容量フラッシュで容量制約がないため8に増やす（本人決定）。
+// AVR版(keyball-link-firmware)は4のまま据え置き。
+#define DYNAMIC_KEYMAP_LAYER_COUNT 8
 
 // トラックボールのデフォルトCPI
 #define KEYBALL_CPI_DEFAULT 500

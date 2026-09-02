@@ -56,7 +56,7 @@
 - **ジェスチャーによるレイヤー切替（トグル式）構想（アイデア段階、未着手）**: キーを押しながら上下左右いずれかの方向にボールを転がすことで、対応するレイヤーへトグル切替する。**8方向ではなく上下左右の4方向を採用**（8方向だと誤操作の可能性が高くなるため、本人判断）。矢印キーモード・軸スナップと同じ「方向検出」の仕組みを流用できる見込み。
 - **汎用連続値調整機能構想（アイデア段階、未着手）**: 対応キーを押しながらボールを回転させると、その回転量に応じて割り当てられたキーが連続送信される汎用機能。当初「音量調整」「輝度調整」「イラレ等のフォントサイズ調整」と個別に挙がっていたアイデアを、**1つの汎用機能（割当先キーを変更可能）として統合**（本人了承済み）。割当先はKeyball Linkから設定変更できるようにしたい。矢印キーモード（速度連動連続入力）と同じ仕組みを流用できる見込み。
 - **スクロール慣性（モメンタムスクロール）構想（アイデア段階、未着手）**: トラックボールでのスクロール操作に、指を離した後も減速しながら続く慣性を付ける。**慣性の強さをKeyball Linkから調整できるようにしたい**（本人希望）。Keyball Link側の対応も必要になる。
-- **レイヤー数の増加（アイデア段階、未着手）**: 現状4固定（`DYNAMIC_KEYMAP_LAYER_COUNT`）を**8に増加**（本人決定。「8あれば困る人はいないだろう」との判断）。RP2040の大容量フラッシュにより容量面の制約はない見込み。上記「ジェスチャーによるレイヤー切替」は4方向のみ対応のため、8レイヤー全てにジェスチャーで到達できるわけではない点に注意（残りは既存のレイヤーキー等でアクセスする想定）。
+- **レイヤー数の増加（実装済み・2026-09-02）**: `DYNAMIC_KEYMAP_LAYER_COUNT`を4→8に変更（`keyball39/keymaps/web_configurator/config.h`）。ビルド確認済み、実機での動作確認はこれから。Keyball Link側はGET_INFOで実際のレイヤー数を都度取得する設計のため、Web側のコード変更は不要（自動対応）。上記「ジェスチャーによるレイヤー切替」は4方向のみ対応のため、8レイヤー全てにジェスチャーで到達できるわけではない点に注意（残りは既存のレイヤーキー等でアクセスする想定）。
 
 ---
 
@@ -104,6 +104,15 @@
 - QMK Firmware本体: `~/qmk_firmware`（ベースコミット`594558ec7b9ac1963870447778426682065e0d20`、2つのパッチ適用済み）
 - RP2040向けビルドに必要な `arm-none-eabi-gcc` は `brew`（`osx-cross/arm` tap）でインストール・修復済み。
 - ビルド時は毎回、`keyboards/keyball` 一式を `~/keyball-rp2040-firmware` から `~/qmk_firmware/keyboards/` にコピーしてから `qmk compile -kb keyball/keyball39 -km web_configurator` を実行する運用（keyball-plus-firmwareと同じパターン）。
+- **重要（2026-09-02判明）**: コピーに`rsync -a`を使うと元ファイルの更新日時がそのままコピー先に引き継がれるため、`.build`内の生成済みキャッシュ（`info_config.h`等）の方が新しいと`make`が「変更なし」と誤判定し、内容を直しても再ビルドに反映されないことがある（実際にUSB PIDが古い値のまま焼かれ続ける事故が発生）。**`qmk compile`の前に必ず該当ターゲットの`.build`キャッシュを削除してから実行する**こと。
+  ```bash
+  rsync -a --delete ~/keyball-rp2040-firmware/keyboards/keyball/ ~/qmk_firmware/keyboards/keyball/ \
+    --exclude keyball46 --exclude keyball61 --exclude keyball44 --exclude one47 --exclude readme.md
+  rm -rf ~/qmk_firmware/.build/obj_keyball_keyball39_web_configurator
+  rm -f ~/qmk_firmware/.build/keyball_keyball39_web_configurator.uf2 ~/qmk_firmware/.build/keyball_keyball39_web_configurator.elf
+  rm -f ~/qmk_firmware/keyball_keyball39_web_configurator.uf2
+  cd ~/qmk_firmware && qmk compile -kb keyball/keyball39 -km web_configurator
+  ```
 
 ## 7. ハードウェア識別情報
 - USB VID `0x5957`（Yowkees共通）・PID `0x0600`（keyball-rp2040-firmware Keyball39専用、新規発行）
