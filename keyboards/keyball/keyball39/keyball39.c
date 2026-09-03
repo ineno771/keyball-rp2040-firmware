@@ -35,6 +35,48 @@ matrix_row_t matrix_mask[MATRIX_ROWS] = {
 };
 // clang-format on
 
+#ifdef RGB_MATRIX_ENABLE
+// LED実測（LED_TEST診断エフェクト）用の暫定g_led_config。
+// matrix_co（キー→LED対応）・point（LED物理座標）ともに未確定のため、
+// 現時点では全キーNO_LED・全LED座標(0,0)のプレースホルダーにしてある。
+// 実測が終わったら、pointを実際のLED座標に、matrix_coを「そのキーに最も近い
+// LEDのインデックス」に更新すること（波紋の起点計算に使う）。
+led_config_t g_led_config = {
+    {
+        // キーマトリクス(8行 x 6列) → LEDインデックス。実測前は全てNO_LED。
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+    },
+    {
+        // LEDインデックス(0-45) → 物理座標(x:0-224, y:0-64)。実測前は全て(0,0)。
+        {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+        {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+        {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+        {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+        {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+    },
+    {
+        // LEDインデックス → フラグ。アンダーグロウ扱い。
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW,
+    },
+};
+#endif
+
 void keyball_on_adjust_layout(keyball_adjust_t v) {
 #ifdef RGBLIGHT_ENABLE
     // adjust RGBLIGHT's clipping and effect ranges

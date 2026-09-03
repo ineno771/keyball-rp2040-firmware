@@ -65,3 +65,24 @@
 // 最大輝度（消費電力抑制）
 #undef RGBLIGHT_LIMIT_VAL
 #define RGBLIGHT_LIMIT_VAL 150
+
+// ===== RGB_MATRIX（波紋演出のためRGBLIGHTから移行中。現在はLED物理位置の実測用暫定ビルド） =====
+// LED総数を実際のハードウェア構成に合わせて上書き（RGBLIGHTと同じく右22 + 左24 = 46個）
+#undef RGB_MATRIX_LED_COUNT
+#define RGB_MATRIX_LED_COUNT 46
+#undef RGB_MATRIX_SPLIT
+#define RGB_MATRIX_SPLIT { 22, 24 }
+// 自作エフェクト（LED_TEST診断・SOLID_RIPPLE）を有効化する
+#define RGB_MATRIX_CUSTOM_USER
+// キー入力に反応するエフェクト（波紋など）に必要
+#define RGB_MATRIX_KEYPRESSES
+// kb_hid.cのLED_EFFECT_MAPが参照する組み込みエフェクト（暫定。本実装時に見直す）
+#define ENABLE_RGB_MATRIX_BREATHING
+#define ENABLE_RGB_MATRIX_CYCLE_ALL
+// SOLID_RIPPLE用の定数（rgb_matrix_user.inc参照）
+#define RIPPLE_MAX_HITS 8   // 同時に表示できる波紋の最大数
+#define RIPPLE_TAIL_LEN 40  // 波紋の尾（フェードアウト）の長さ
+// LED実測が終わるまでは診断エフェクト固定で起動する
+#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_LED_TEST
+// 最大輝度（消費電力抑制、RGBLIGHT側と揃える）
+#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
