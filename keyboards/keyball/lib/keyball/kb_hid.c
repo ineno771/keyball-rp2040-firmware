@@ -236,36 +236,35 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // エフェクトID対応表はファイル先頭のLED_EFFECT_MAP（file-scope）を使う。
         // レイヤー連動LED（0x1A-0x1D）からも同じ表を参照するため。
 
-        // 0x0B: LED設定を返す
+        // 0x0B: 通常（レイヤー0）のLED設定を返す
         // 応答: [cmd, effect_id, hue, sat, val, speed, status]
+        // 現在いるレイヤーやレイヤー連動LEDのオーバーライド状態に関わらず、常に
+        // 「通常」の設定（kb_led_config）を返す。
         case KB_HID_CMD_GET_LED: {
-            // effect_idはRGBLIGHT本体のモードからの逆引きではなく、SET_LEDのたびに
-            // 保存している生の値を返す（季節限定エフェクトは実モードを持たないため）。
-            response[1] = kb_led_effect_id_get();
-            response[2] = rgblight_get_hue();
-            response[3] = rgblight_get_sat();
-            response[4] = rgblight_get_val();
-            response[5] = rgblight_get_speed();
+            kb_led_config_t cfg = kb_led_config_get();
+            response[1] = cfg.effect_id;
+            response[2] = cfg.hue;
+            response[3] = cfg.sat;
+            response[4] = cfg.val;
+            response[5] = cfg.speed;
             response[6] = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x0C: LED設定を変更してEEPROMに保存する
+        // 0x0C: 通常（レイヤー0）のLED設定を変更してEEPROMに保存する
         // 要求: [cmd, effect_id, hue, sat, val, speed]
         // 応答: [cmd, status]
+        // 現在いるレイヤーに関わらず、常に「通常」の設定（kb_led_config）を変更する。
+        // 画面に今すぐ反映するのは、レイヤー連動LEDのオーバーライドが今アクティブで
+        // ない時だけ（アクティブ中なら、そのレイヤーを抜けた瞬間に反映される）。
         case KB_HID_CMD_SET_LED: {
-            uint8_t effect_id = data[1] < KB_LED_EFFECT_TOTAL_COUNT ? data[1] : 0;
-            kb_led_effect_id_set(effect_id);
-            if (effect_id == 0) {
-                rgblight_disable();
-            } else {
-                rgblight_enable();
-                // 季節限定エフェクト(11-13)はRGBLIGHT本体にモードがないため、見た目に
-                // 影響しない単色モードを土台にしておき、実際の描画はkeyball_seasonal_led_task()
-                // が毎フレーム上書きする。
-                rgblight_mode(kb_hid_led_effect_is_seasonal(effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : LED_EFFECT_MAP[effect_id]);
-                rgblight_sethsv(data[2], data[3], data[4]);
-                rgblight_set_speed(data[5]);
+            uint8_t         effect_id = data[1] < KB_LED_EFFECT_TOTAL_COUNT ? data[1] : 0;
+            kb_led_config_t cfg       = {
+                .effect_id = effect_id, .hue = data[2], .sat = data[3], .val = data[4], .speed = data[5],
+            };
+            kb_led_config_set(&cfg);
+            if (!keyball_layer_led_overriding()) {
+                keyball_apply_normal_led();
             }
             response[1] = KB_HID_STATUS_OK;
             break;

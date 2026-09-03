@@ -596,6 +596,43 @@ void keyball_set_precision_layer(bool on) {
 }
 
 #ifdef RGBLIGHT_ENABLE
+// レイヤー連動LED: 通常（レイヤー0）のLED設定はkb_led_config（kb_settings.c、RGBLIGHT本体の
+// EEPROM機能とは独立）に一元管理する。理由: オーバーライド中はRGBLIGHT本体の「現在の表示」が
+// レイヤー側の色になっているため、rgblight_get_*()を読んでも通常設定を復元できず、
+// オーバーライド中にSET_LEDされた変更がレイヤーを抜けた時に消えてしまう事故があった。
+static bool g_layer_led_overriding = false;
+
+bool keyball_layer_led_overriding(void) {
+    return g_layer_led_overriding;
+}
+
+void keyball_apply_normal_led(void) {
+    kb_led_config_t cfg = kb_led_config_get();
+    if (cfg.effect_id == 0) {
+        rgblight_disable_noeeprom();
+    } else {
+        rgblight_enable_noeeprom();
+        rgblight_mode_noeeprom(kb_hid_led_effect_is_seasonal(cfg.effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : kb_hid_led_effect_to_mode(cfg.effect_id));
+        rgblight_sethsv_noeeprom(cfg.hue, cfg.sat, cfg.val);
+        rgblight_set_speed_noeeprom(cfg.speed);
+    }
+}
+
+void keyball_apply_layer_led(uint8_t hl) {
+    bool           layer_led_on = kb_layer_led_enable_get();
+    kb_layer_led_t layer_led    = layer_led_on ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
+
+    if (layer_led_on && layer_led.enabled) {
+        g_layer_led_overriding = true;
+        rgblight_mode_noeeprom(kb_hid_led_effect_is_seasonal(layer_led.effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : kb_hid_led_effect_to_mode(layer_led.effect_id));
+        rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
+        rgblight_set_speed_noeeprom(layer_led.speed);
+    } else if (g_layer_led_overriding) {
+        g_layer_led_overriding = false;
+        keyball_apply_normal_led();
+    }
+}
+
 // 季節限定LEDエフェクト: 単色モードの色を毎フレーム少しずつ変えることでクロスフェード
 // させる（RGBLIGHT本体のクリスマスエフェクトと似た「ゆっくり色が移り変わる」動き）。
 //
@@ -637,10 +674,11 @@ void keyball_seasonal_led_task(void) {
         val       = override.val;
         speed     = override.speed;
     } else {
-        effect_id = kb_led_effect_id_get();
-        sat       = rgblight_get_sat();
-        val       = rgblight_get_val();
-        speed     = rgblight_get_speed();
+        kb_led_config_t cfg = kb_led_config_get();
+        effect_id            = cfg.effect_id;
+        sat                  = cfg.sat;
+        val                  = cfg.val;
+        speed                = cfg.speed;
     }
 
     if (!kb_hid_led_effect_is_seasonal(effect_id)) return;  // 通常のRGBLIGHTモードはrgblight_task()に任せる
@@ -760,6 +798,11 @@ void keyboard_post_init_kb(void) {
     if (!rgb_matrix_is_enabled()) {
         rgb_matrix_enable();
     }
+#endif
+
+#ifdef RGBLIGHT_ENABLE
+    // 通常（レイヤー0）のLED設定をkb_led_config（独自管理）から起動時に反映する。
+    keyball_apply_normal_led();
 #endif
 
     keyboard_post_init_user();

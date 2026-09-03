@@ -268,6 +268,23 @@ void keyball_set_precision_layer(bool on);
 /// the effective effect_id is a regular RGBLIGHT mode (rgblight_task() already handles that).
 /// Call every matrix_scan_user tick.
 void keyball_seasonal_led_task(void);
+
+/// keyball_apply_normal_led applies the stored "normal" (layer 0) LED config to the live
+/// RGBLIGHT display right now (via the _noeeprom variants — kb_led_config in kb_settings is
+/// the persisted source of truth, not RGBLIGHT's own eeconfig). Call at boot, and after
+/// SET_LED when no layer override is currently active.
+void keyball_apply_normal_led(void);
+
+/// keyball_apply_layer_led reflects the layer-linked LED feature for the given highest active
+/// layer: applies that layer's override live if enabled, otherwise (including when the
+/// feature itself is off) reverts to the normal LED config via keyball_apply_normal_led().
+/// Call from layer_state_set_user with get_highest_layer(state).
+void keyball_apply_layer_led(uint8_t hl);
+
+/// keyball_layer_led_overriding reports whether a layer's LED override is currently being
+/// displayed (as opposed to the normal/layer-0 config). SET_LED uses this to decide whether
+/// changing the normal config should also change what's currently on screen.
+bool keyball_layer_led_overriding(void);
 #endif
 
 /// keyball_get_scrollsnap_mode gets current scroll snap mode.

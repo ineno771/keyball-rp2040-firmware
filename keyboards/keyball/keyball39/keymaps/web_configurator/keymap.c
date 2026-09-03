@@ -14,14 +14,6 @@
 extern uint8_t kb_aml_threshold;
 #endif
 
-// レイヤー連動LED: 有効化しているレイヤーに専用の光り方を設定していると、
-// そのレイヤーにいる間ずっとその光り方になる（抜けると通常のLED設定に戻る）。
-// 無効時・専用設定なしレイヤーでは何もしない（従来どおり通常のLED設定のまま）。
-#ifdef RGBLIGHT_ENABLE
-static bool    g_layer_led_overriding   = false;  // 現在レイヤー専用の光り方を表示中か
-static uint8_t g_layer_led_base_mode;              // 抜けた時に戻す「通常」の光り方
-static uint8_t g_layer_led_base_hue, g_layer_led_base_sat, g_layer_led_base_val;
-#endif
 
 #ifdef GESTURE_ENABLE
 // ジェスチャー: ホールド中のトラックボール移動を累積し方向で判定して送出。
@@ -199,30 +191,11 @@ layer_state_t layer_state_set_user(layer_state_t state) {
     uint8_t hl = get_highest_layer(state);
 
 #ifdef RGBLIGHT_ENABLE
-    // レイヤー連動LED: 有効かつ現在のレイヤーに専用設定があれば、そのレイヤーに
-    // いる間ずっとその光り方にする。なければ（無効時も含め）通常のLED設定に戻す。
-    kb_layer_led_t layer_led   = { .enabled = 0 };
-    bool           layer_led_on = kb_layer_led_enable_get();
-    if (layer_led_on) layer_led = kb_layer_led_get(hl);
-
-    if (layer_led_on && layer_led.enabled) {
-        if (!g_layer_led_overriding) {
-            // 通常時の光り方を退避しておく（レイヤーを抜けたら戻す用）
-            g_layer_led_base_mode = rgblight_get_mode();
-            g_layer_led_base_hue  = rgblight_get_hue();
-            g_layer_led_base_sat  = rgblight_get_sat();
-            g_layer_led_base_val  = rgblight_get_val();
-            g_layer_led_overriding = true;
-        }
-        // 季節限定エフェクト(11-13)はRGBLIGHT本体にモードがないため、見た目に影響しない
-        // 単色モードを土台にしておき、実際の描画はkeyball_seasonal_led_task()が上書きする。
-        rgblight_mode_noeeprom(kb_hid_led_effect_is_seasonal(layer_led.effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : kb_hid_led_effect_to_mode(layer_led.effect_id));
-        rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
-    } else if (g_layer_led_overriding) {
-        rgblight_mode_noeeprom(g_layer_led_base_mode);
-        rgblight_sethsv_noeeprom(g_layer_led_base_hue, g_layer_led_base_sat, g_layer_led_base_val);
-        g_layer_led_overriding = false;
-    }
+    // レイヤー連動LED: 有効化しているレイヤーに専用の光り方を設定していると、そのレイヤーに
+    // いる間ずっとその光り方になる（抜けると通常のLED設定に戻る）。無効時・専用設定なし
+    // レイヤーでは何もしない（通常のLED設定のまま）。実処理はkeyball.c側に集約している
+    // （SET_LEDもここを経由するようにして、通常設定とレイヤー設定が混線しないようにするため）。
+    keyball_apply_layer_led(hl);
 #endif
 
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）

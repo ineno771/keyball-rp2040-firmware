@@ -215,23 +215,29 @@ void kb_layer_led_set(uint8_t layer, const kb_layer_led_t *cfg) {
     eeprom_write_block(buf, (void *)(uintptr_t)addr, KB_LAYER_LED_ENTRY_SIZE);
 }
 
-// ── 通常（レイヤー0）のLED設定の実効effect_id ─────────────────────
+// ── 通常（レイヤー0）のLED設定 ────────────────────────────────
 // 値の妥当性検証（有効なeffect_id範囲かどうか）はプロトコル層(kb_hid.c)の責務とし、
 // ここでは他の設定と同様に生のバイトをそのまま保存・返す。
-static uint8_t g_led_effect_id        = 0xEE;
-static bool    g_led_effect_id_loaded = false;
+static kb_led_config_t g_led_config        = {0};
+static bool            g_led_config_loaded = false;
 
-uint8_t kb_led_effect_id_get(void) {
-    if (!g_led_effect_id_loaded) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_LED_EFFECT_ID_EEPROM);
-        g_led_effect_id        = (v == 0xFF) ? 0 : v;  // 未初期化(0xFF)はオフ扱い
-        g_led_effect_id_loaded = true;
+kb_led_config_t kb_led_config_get(void) {
+    if (!g_led_config_loaded) {
+        uint8_t buf[sizeof(kb_led_config_t)];
+        eeprom_read_block(buf, (const void *)(uintptr_t)KB_LED_CONFIG_EEPROM, sizeof(buf));
+        if (buf[0] == 0xFF) {
+            // 未初期化。RGBLIGHT_DEFAULT_MODE(呼吸)相当のそれらしい既定値にしておく。
+            g_led_config = (kb_led_config_t){.effect_id = 2, .hue = 170, .sat = 255, .val = 100, .speed = 128};
+        } else {
+            memcpy(&g_led_config, buf, sizeof(buf));
+        }
+        g_led_config_loaded = true;
     }
-    return g_led_effect_id;
+    return g_led_config;
 }
 
-void kb_led_effect_id_set(uint8_t v) {
-    g_led_effect_id        = v;
-    g_led_effect_id_loaded = true;
-    eeprom_write_byte((uint8_t *)(uintptr_t)KB_LED_EFFECT_ID_EEPROM, v);
+void kb_led_config_set(const kb_led_config_t *cfg) {
+    g_led_config        = *cfg;
+    g_led_config_loaded = true;
+    eeprom_write_block(cfg, (void *)(uintptr_t)KB_LED_CONFIG_EEPROM, sizeof(*cfg));
 }

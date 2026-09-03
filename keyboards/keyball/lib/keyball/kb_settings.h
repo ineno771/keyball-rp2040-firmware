@@ -109,9 +109,21 @@ void kb_layer_led_enable_set(bool v);
 kb_layer_led_t kb_layer_led_get(uint8_t layer);
 void           kb_layer_led_set(uint8_t layer, const kb_layer_led_t *cfg);
 
-// 通常（レイヤー0）のLED設定の実効effect_id。季節限定エフェクト（ハロウィン等）は
-// RGBLIGHT本体のモードとして存在せず rgblight_get_mode() から復元できないため、
-// GET/SET_LEDの度にここへ生の値を保存しておく（既定0=オフ）。
-#define KB_LED_EFFECT_ID_EEPROM 0x0411
-uint8_t kb_led_effect_id_get(void);
-void    kb_led_effect_id_set(uint8_t v);
+// 通常（レイヤー0）のLED設定。RGBLIGHT本体のEEPROM機能には頼らず、ここで完全に
+// 独立管理する。理由: レイヤー連動LEDが有効な間、RGBLIGHT本体の「現在の表示」は
+// レイヤーのオーバーライドに上書きされているため、rgblight_get_*()を読んでも
+// 本来の「通常」の設定は取得できない（オーバーライド中にSET_LEDされた場合、
+// 元に戻った時にオーバーライド前の古い値へ戻ってしまう事故が起きていた）。
+// SET_LEDのたびに必ずここへ保存し、実際に画面へ反映するかどうかは
+// 呼び出し側（kb_hid.c）がkeyball_layer_led_overriding()を見て判断する。
+typedef struct {
+    uint8_t effect_id;
+    uint8_t hue;
+    uint8_t sat;
+    uint8_t val;
+    uint8_t speed;
+} __attribute__((packed)) kb_led_config_t;
+
+#define KB_LED_CONFIG_EEPROM 0x0411  // 5バイト（0x0411-0x0415）
+kb_led_config_t kb_led_config_get(void);
+void            kb_led_config_set(const kb_led_config_t *cfg);
