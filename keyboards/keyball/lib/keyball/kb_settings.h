@@ -45,7 +45,8 @@ void kb_settings_set(const kb_settings_t *s);
 #define KB_GESTURE_LAYER_EEPROM  0x03E1  // ジェスチャーレイヤー保存先
 #define KB_GESTURE_TH_H_EEPROM  0x03E2  // ジェスチャー横方向しきい値保存先
 #define KB_GESTURE_TH_V_EEPROM  0x03E3  // ジェスチャー縦方向しきい値保存先
-#define KB_PRECISION_DIV_EEPROM 0x03E4  // 超低速モードの分周値保存先
+#define KB_PRECISION_DIV_EEPROM   0x03E4  // 超低速モードの分周値保存先
+#define KB_PRECISION_LAYER_EEPROM 0x03E5  // 超低速モードの連動レイヤー保存先
 #define KB_LAYER_NONE            0xFE    // 「なし」を表す値（0xFF=未初期化と区別）
 
 // スクロールレイヤー（0-7=そのレイヤーでスクロール / KB_LAYER_NONE=無効。既定3）
@@ -74,3 +75,8 @@ void    kb_gesture_th_v_set(uint8_t v);
 #define KB_PRECISION_DIV_MAX     20
 uint8_t kb_precision_div_get(void);
 void    kb_precision_div_set(uint8_t v);
+
+// 超低速モードの連動レイヤー（0-7=そのレイヤーで自動的に超低速モード / KB_LAYER_NONE=なし。既定なし）
+// PRC_MOキーとは独立に働き、どちらか一方でも条件を満たせば超低速モードになる。
+uint8_t kb_precision_layer_get(void);
+void    kb_precision_layer_set(uint8_t v);

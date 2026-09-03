@@ -552,6 +552,45 @@ void keyball_set_scroll_mode(bool mode) {
     keyball.scroll_mode = mode;
 }
 
+// 超低速（精密作業）モード: PRC_MOキーの押下とレイヤー連動の2系統から要求され、
+// どちらか一方でも要求していればON。片方だけ解除されても、もう一方が要求中なら
+// CPIを戻さない（先に切れた方に引っ張られてCPIが元に戻ってしまう事故を防ぐ）。
+static bool    precision_req_key    = false;
+static bool    precision_req_layer  = false;
+static uint8_t precision_saved_cpi  = 0;
+static bool    precision_active     = false;
+
+static void precision_apply(void) {
+    bool want = precision_req_key || precision_req_layer;
+    if (want && !precision_active) {
+        precision_saved_cpi = keyball_get_cpi();
+        uint8_t div = kb_precision_div_get();
+        // 四捨五入で分周する（切り捨てだと分周値どおりの比率にならないため）。
+        // なお、実CPIは100刻みが下限のため、ベースCPIが低い場合は指定した分周値まで
+        // 到達できず100CPIに張り付くことがある（ハードウェアの制約）。
+        uint16_t v = (precision_saved_cpi + div / 2) / div;
+        keyball_set_cpi(v < 1 ? 1 : (uint8_t)v);
+        precision_active = true;
+    } else if (!want && precision_active) {
+        keyball_set_cpi(precision_saved_cpi);
+        precision_active = false;
+    }
+}
+
+bool keyball_get_precision_mode(void) {
+    return precision_active;
+}
+
+void keyball_set_precision_key(bool pressed) {
+    precision_req_key = pressed;
+    precision_apply();
+}
+
+void keyball_set_precision_layer(bool on) {
+    precision_req_layer = on;
+    precision_apply();
+}
+
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void) {
 #if KEYBALL_SCROLLSNAP_ENABLE == 2
     return keyball.scrollsnap_mode;
@@ -718,24 +757,10 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
             // processes.
             return true;
 
-        case PRC_MO: {
+        case PRC_MO:
             // 超低速（精密作業）モード: 押している間だけCPIを分周値で割る
-            static uint8_t precision_saved_cpi = 0;
-            static bool    precision_active    = false;
-            if (record->event.pressed) {
-                if (!precision_active) {
-                    precision_saved_cpi = keyball_get_cpi();
-                    uint8_t div = kb_precision_div_get();
-                    uint8_t v   = precision_saved_cpi / div;
-                    keyball_set_cpi(v < 1 ? 1 : v);
-                    precision_active = true;
-                }
-            } else if (precision_active) {
-                keyball_set_cpi(precision_saved_cpi);
-                precision_active = false;
-            }
+            keyball_set_precision_key(record->event.pressed);
             return true;
-        }
     }
 
     // process events which works on pressed only.

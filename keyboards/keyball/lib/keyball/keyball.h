@@ -245,6 +245,20 @@ bool keyball_get_scroll_mode(void);
 /// keyball_set_scroll_mode modify scroll mode.
 void keyball_set_scroll_mode(bool mode);
 
+/// keyball_get_precision_mode gets whether ultra-slow (precision) mode is currently active.
+bool keyball_get_precision_mode(void);
+
+/// keyball_set_precision_key reflects the PRC_MO key's press/release state into precision mode.
+/// Combined with keyball_set_precision_layer via OR: precision mode is active while either
+/// source requests it, so holding the key while the precision layer is also active (or vice
+/// versa) does not prematurely restore the saved CPI.
+void keyball_set_precision_key(bool pressed);
+
+/// keyball_set_precision_layer reflects whether the configured precision-mode layer is
+/// currently the highest active layer. See keyball_set_precision_key for how the two sources
+/// combine.
+void keyball_set_precision_layer(bool on);
+
 /// keyball_get_scrollsnap_mode gets current scroll snap mode.
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void);
 

@@ -217,6 +217,7 @@ layer_state_t layer_state_set_user(layer_state_t state) {
     }
 
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）
+    keyball_set_precision_layer(kb_precision_layer_get() == hl);  // 設定レイヤーで超低速モード
 #ifdef GESTURE_ENABLE
     g_gesture_layer_on = (kb_gesture_layer_get() == hl);   // 設定レイヤーでジェスチャー
     if (!g_gesture_layer_on && !g_gesture_active && !g_gesture_pending) {

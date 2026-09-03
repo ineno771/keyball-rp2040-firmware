@@ -141,3 +141,22 @@ void kb_precision_div_set(uint8_t v) {
     g_precision_div_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_PRECISION_DIV_EEPROM, g_precision_div);
 }
+
+// ── 超低速モードの連動レイヤー（ジェスチャーレイヤーと同パターン。未初期化/0xFE は「なし」）──
+static uint8_t g_precision_layer        = 0xEE;
+static bool    g_precision_layer_loaded = false;
+
+uint8_t kb_precision_layer_get(void) {
+    if (!g_precision_layer_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_PRECISION_LAYER_EEPROM);
+        g_precision_layer = (v <= 7) ? v : KB_LAYER_NONE;  // 0-7=レイヤー / それ以外=なし
+        g_precision_layer_loaded = true;
+    }
+    return g_precision_layer;
+}
+
+void kb_precision_layer_set(uint8_t v) {
+    g_precision_layer        = (v <= 7) ? v : KB_LAYER_NONE;
+    g_precision_layer_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_PRECISION_LAYER_EEPROM, g_precision_layer);
+}

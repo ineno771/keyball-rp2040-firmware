@@ -370,19 +370,21 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
-        // 0x18: 超低速モードのCPI分周値を返す
-        // 応答: [cmd, div, status]
+        // 0x18: 超低速モードのCPI分周値・連動レイヤーを返す
+        // 応答: [cmd, div, layer, status]
         case KB_HID_CMD_GET_PRECISION: {
             response[1] = kb_precision_div_get();
-            response[2] = KB_HID_STATUS_OK;
+            response[2] = kb_precision_layer_get();  // 連動レイヤー（0-7 / 0xFE=なし）
+            response[3] = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x19: 超低速モードのCPI分周値を変更してEEPROMに保存
-        // 要求: [cmd, div]
+        // 0x19: 超低速モードのCPI分周値・連動レイヤーを変更してEEPROMに保存
+        // 要求: [cmd, div, layer]
         // 応答: [cmd, status]
         case KB_HID_CMD_SET_PRECISION: {
             kb_precision_div_set(data[1]);
+            kb_precision_layer_set(data[2]);  // 連動レイヤー（0-7 / 0xFE=なし）
             response[1] = KB_HID_STATUS_OK;
             break;
         }
