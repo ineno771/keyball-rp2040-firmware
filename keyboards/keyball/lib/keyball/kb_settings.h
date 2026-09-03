@@ -69,10 +69,12 @@ uint8_t kb_gesture_th_v_get(void);
 void    kb_gesture_th_v_set(uint8_t v);
 #endif
 
-// 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-20）
+// 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-5）
+// 上限は5: 実CPIは100刻みが下限のため、デフォルトCPI(500)ではこれ以上大きくしても
+// 100CPIに張り付くだけで差が出ない（本人判断で5を上限に固定）。
 #define KB_PRECISION_DIV_DEFAULT 4
 #define KB_PRECISION_DIV_MIN     2
-#define KB_PRECISION_DIV_MAX     20
+#define KB_PRECISION_DIV_MAX     5
 uint8_t kb_precision_div_get(void);
 void    kb_precision_div_set(uint8_t v);
 
