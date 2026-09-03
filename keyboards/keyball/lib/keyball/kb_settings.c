@@ -214,3 +214,24 @@ void kb_layer_led_set(uint8_t layer, const kb_layer_led_t *cfg) {
     };
     eeprom_write_block(buf, (void *)(uintptr_t)addr, KB_LAYER_LED_ENTRY_SIZE);
 }
+
+// ── 通常（レイヤー0）のLED設定の実効effect_id ─────────────────────
+// 値の妥当性検証（有効なeffect_id範囲かどうか）はプロトコル層(kb_hid.c)の責務とし、
+// ここでは他の設定と同様に生のバイトをそのまま保存・返す。
+static uint8_t g_led_effect_id        = 0xEE;
+static bool    g_led_effect_id_loaded = false;
+
+uint8_t kb_led_effect_id_get(void) {
+    if (!g_led_effect_id_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_LED_EFFECT_ID_EEPROM);
+        g_led_effect_id        = (v == 0xFF) ? 0 : v;  // 未初期化(0xFF)はオフ扱い
+        g_led_effect_id_loaded = true;
+    }
+    return g_led_effect_id;
+}
+
+void kb_led_effect_id_set(uint8_t v) {
+    g_led_effect_id        = v;
+    g_led_effect_id_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_LED_EFFECT_ID_EEPROM, v);
+}

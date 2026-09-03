@@ -23,6 +23,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "keyball.h"
 #include "kb_settings.h"
 #include "drivers/pmw3360/pmw3360.h"
+#ifdef RGBLIGHT_ENABLE
+#    include "kb_hid.h"
+#    include "color.h"
+#endif
 
 #include <string.h>
 
@@ -590,6 +594,86 @@ void keyball_set_precision_layer(bool on) {
     precision_req_layer = on;
     precision_apply();
 }
+
+#ifdef RGBLIGHT_ENABLE
+// 季節限定LEDエフェクト: RGBLIGHT本体のクリスマスエフェクト(rgblight_effect_christmas)と
+// 同じキュービックベジェのイージングで2色をクロスフェードするが、色相が離れたテーマ
+// ペアでも虹色を経由せず自然に混ざるようRGB空間で補間する（HSV空間だと色相の遠い
+// ペアで無関係な色を経由してしまうため）。
+static void seasonal_pair_for(uint8_t effect_id, uint8_t *hue_a, uint8_t *hue_b) {
+    switch (effect_id) {
+        case KB_LED_EFFECT_HALLOWEEN: *hue_a = 21;  *hue_b = 191; break;  // オレンジ×紫
+        case KB_LED_EFFECT_NEWYEAR:   *hue_a = 32;  *hue_b = 0;   break;  // ゴールド×レッド
+        case KB_LED_EFFECT_EASTER:    *hue_a = 228; *hue_b = 42;  break;  // パステルピンク×パステルイエロー
+        default:                      *hue_a = 0;   *hue_b = 85;  break; // 万一の不正値はクリスマス相当
+    }
+}
+
+static uint8_t  g_seasonal_pos       = 0;
+static int8_t   g_seasonal_dir       = 1;
+static uint16_t g_seasonal_last_tick = 0;
+
+void keyball_seasonal_led_task(void) {
+    // 現在の実効LED設定（レイヤー連動が有効かつ現在レイヤーに専用設定があればそちら、
+    // なければ通常のLED設定）を、layer_state_set_userに頼らずここで独立して求める。
+    // マスター側の発火（HIDコマンド・レイヤー切替はマスターでしか処理されない）に依存せず、
+    // スプリット両側のmatrix_scan_userから毎回呼ばれても正しく描画できるようにするため。
+    uint8_t        hl       = get_highest_layer(layer_state);
+    kb_layer_led_t override = kb_layer_led_enable_get() ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
+
+    uint8_t effect_id, sat, val, speed;
+    if (override.enabled) {
+        effect_id = override.effect_id;
+        sat       = override.sat;
+        val       = override.val;
+        speed     = override.speed;
+    } else {
+        effect_id = kb_led_effect_id_get();
+        sat       = rgblight_get_sat();
+        val       = rgblight_get_val();
+        speed     = rgblight_get_speed();
+    }
+
+    if (!kb_hid_led_effect_is_seasonal(effect_id)) return;  // 通常のRGBLIGHTモードはrgblight_task()に任せる
+
+    uint16_t interval = 60 - ((uint16_t)speed * 55 / 255);  // 5〜60ms（speedが大きいほど速い）
+    if (timer_elapsed(g_seasonal_last_tick) < interval) return;
+    g_seasonal_last_tick = timer_read();
+
+    uint8_t hue_a, hue_b;
+    seasonal_pair_for(effect_id, &hue_a, &hue_b);
+    rgb_t rgb_a = hsv_to_rgb((hsv_t){.h = hue_a, .s = sat, .v = val});
+    rgb_t rgb_b = hsv_to_rgb((hsv_t){.h = hue_b, .s = sat, .v = val});
+
+    const uint8_t max_pos = 32;
+    uint32_t      xa      = (uint32_t)g_seasonal_pos * g_seasonal_pos * g_seasonal_pos;
+    uint32_t      xb      = (uint32_t)(max_pos - g_seasonal_pos) * (max_pos - g_seasonal_pos) * (max_pos - g_seasonal_pos);
+    uint8_t       t       = (uint8_t)(((uint32_t)255 * xa) / (xa + xb));  // 0-255の補間係数
+
+    uint8_t r1 = rgb_a.r + (uint8_t)(((int16_t)rgb_b.r - rgb_a.r) * t / 255);
+    uint8_t g1 = rgb_a.g + (uint8_t)(((int16_t)rgb_b.g - rgb_a.g) * t / 255);
+    uint8_t b1 = rgb_a.b + (uint8_t)(((int16_t)rgb_b.b - rgb_a.b) * t / 255);
+    uint8_t r2 = rgb_b.r + (uint8_t)(((int16_t)rgb_a.r - rgb_b.r) * t / 255);
+    uint8_t g2 = rgb_b.g + (uint8_t)(((int16_t)rgb_a.g - rgb_b.g) * t / 255);
+    uint8_t b2 = rgb_b.b + (uint8_t)(((int16_t)rgb_a.b - rgb_b.b) * t / 255);
+
+    for (uint8_t i = 0; i < RGBLIGHT_LED_COUNT; i++) {
+        if ((i / 4) % 2) {
+            rgblight_setrgb_at(r1, g1, b1, i);
+        } else {
+            rgblight_setrgb_at(r2, g2, b2, i);
+        }
+    }
+    rgblight_set();
+
+    if (g_seasonal_pos == 0) {
+        g_seasonal_dir = 1;
+    } else if (g_seasonal_pos == max_pos) {
+        g_seasonal_dir = -1;
+    }
+    g_seasonal_pos += g_seasonal_dir;
+}
+#endif
 
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void) {
 #if KEYBALL_SCROLLSNAP_ENABLE == 2

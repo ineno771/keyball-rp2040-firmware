@@ -51,4 +51,13 @@ void kb_hid_receive(uint8_t *data, uint8_t length);
 // kb_hid.cとkeymap.c(レイヤー連動LED)の両方から使う唯一の変換元。
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id);
 uint8_t kb_hid_led_effect_count(void);
+
+// 季節限定エフェクト（ハロウィン等）。RGBLIGHT本体にモードとして存在しないため、
+// kb_hid_led_effect_to_mode()では0（オフ相当）が返る。実際の描画は
+// keyball_seasonal_led_task()が別途行う。
+#define KB_LED_EFFECT_HALLOWEEN      11
+#define KB_LED_EFFECT_NEWYEAR        12
+#define KB_LED_EFFECT_EASTER         13
+#define KB_LED_EFFECT_TOTAL_COUNT    14  // 有効なeffect_idの総数（0-13）
+bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif

@@ -108,3 +108,10 @@ void kb_layer_led_enable_set(bool v);
 // レイヤーN（1-KB_LAYER_LED_MAX_LAYER）のLED設定を取得・変更する（既定: enabled=0）
 kb_layer_led_t kb_layer_led_get(uint8_t layer);
 void           kb_layer_led_set(uint8_t layer, const kb_layer_led_t *cfg);
+
+// 通常（レイヤー0）のLED設定の実効effect_id。季節限定エフェクト（ハロウィン等）は
+// RGBLIGHT本体のモードとして存在せず rgblight_get_mode() から復元できないため、
+// GET/SET_LEDの度にここへ生の値を保存しておく（既定0=オフ）。
+#define KB_LED_EFFECT_ID_EEPROM 0x0411
+uint8_t kb_led_effect_id_get(void);
+void    kb_led_effect_id_set(uint8_t v);

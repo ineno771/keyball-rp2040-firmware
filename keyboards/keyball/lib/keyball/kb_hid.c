@@ -56,6 +56,10 @@ uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id) {
 uint8_t kb_hid_led_effect_count(void) {
     return LED_EFFECT_COUNT;
 }
+
+bool kb_hid_led_effect_is_seasonal(uint8_t effect_id) {
+    return effect_id >= KB_LED_EFFECT_HALLOWEEN && effect_id < KB_LED_EFFECT_TOTAL_COUNT;
+}
 #endif
 
 void kb_hid_receive(uint8_t *data, uint8_t length) {
@@ -235,12 +239,9 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // 0x0B: LED設定を返す
         // 応答: [cmd, effect_id, hue, sat, val, speed, status]
         case KB_HID_CMD_GET_LED: {
-            uint8_t mode = rgblight_is_enabled() ? rgblight_get_mode() : 0;
-            uint8_t effect_id = 0;
-            for (uint8_t i = 1; i < LED_EFFECT_COUNT; i++) {
-                if (LED_EFFECT_MAP[i] == mode) { effect_id = i; break; }
-            }
-            response[1] = effect_id;
+            // effect_idはRGBLIGHT本体のモードからの逆引きではなく、SET_LEDのたびに
+            // 保存している生の値を返す（季節限定エフェクトは実モードを持たないため）。
+            response[1] = kb_led_effect_id_get();
             response[2] = rgblight_get_hue();
             response[3] = rgblight_get_sat();
             response[4] = rgblight_get_val();
@@ -253,12 +254,16 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // 要求: [cmd, effect_id, hue, sat, val, speed]
         // 応答: [cmd, status]
         case KB_HID_CMD_SET_LED: {
-            uint8_t effect_id = data[1] < LED_EFFECT_COUNT ? data[1] : 0;
+            uint8_t effect_id = data[1] < KB_LED_EFFECT_TOTAL_COUNT ? data[1] : 0;
+            kb_led_effect_id_set(effect_id);
             if (effect_id == 0) {
                 rgblight_disable();
             } else {
                 rgblight_enable();
-                rgblight_mode(LED_EFFECT_MAP[effect_id]);
+                // 季節限定エフェクト(11-13)はRGBLIGHT本体にモードがないため、見た目に
+                // 影響しない単色モードを土台にしておき、実際の描画はkeyball_seasonal_led_task()
+                // が毎フレーム上書きする。
+                rgblight_mode(kb_hid_led_effect_is_seasonal(effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : LED_EFFECT_MAP[effect_id]);
                 rgblight_sethsv(data[2], data[3], data[4]);
                 rgblight_set_speed(data[5]);
             }
@@ -305,7 +310,7 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // 応答: [cmd, status]
         case KB_HID_CMD_SET_LAYER_LED: {
             uint8_t        layer     = data[1];
-            uint8_t        effect_id = data[3] < LED_EFFECT_COUNT ? data[3] : 0;
+            uint8_t        effect_id = data[3] < KB_LED_EFFECT_TOTAL_COUNT ? data[3] : 0;
             kb_layer_led_t cfg       = {
                 .enabled   = data[2] != 0,
                 .effect_id = effect_id,

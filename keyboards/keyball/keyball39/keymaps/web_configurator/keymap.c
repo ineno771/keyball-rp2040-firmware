@@ -214,7 +214,9 @@ layer_state_t layer_state_set_user(layer_state_t state) {
             g_layer_led_base_val  = rgblight_get_val();
             g_layer_led_overriding = true;
         }
-        rgblight_mode_noeeprom(kb_hid_led_effect_to_mode(layer_led.effect_id));
+        // 季節限定エフェクト(11-13)はRGBLIGHT本体にモードがないため、見た目に影響しない
+        // 単色モードを土台にしておき、実際の描画はkeyball_seasonal_led_task()が上書きする。
+        rgblight_mode_noeeprom(kb_hid_led_effect_is_seasonal(layer_led.effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : kb_hid_led_effect_to_mode(layer_led.effect_id));
         rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
     } else if (g_layer_led_overriding) {
         rgblight_mode_noeeprom(g_layer_led_base_mode);
@@ -237,6 +239,10 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 
 void matrix_scan_user(void) {
+#ifdef RGBLIGHT_ENABLE
+    keyball_seasonal_led_task();
+#endif
+
 #ifdef GESTURE_ENABLE
     // ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定
     if (g_gesture_pending) {
