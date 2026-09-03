@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifdef RGBLIGHT_ENABLE
 #    include "kb_hid.h"
 #    include "color.h"
+#    include "sync_timer.h"
 #endif
 
 #include <string.h>
@@ -596,31 +597,66 @@ void keyball_set_precision_layer(bool on) {
 }
 
 #ifdef RGBLIGHT_ENABLE
-// 季節限定LEDエフェクト: RGBLIGHT本体のクリスマスエフェクト(rgblight_effect_christmas)と
-// 同じキュービックベジェのイージングで2色をクロスフェードするが、色相が離れたテーマ
-// ペアでも虹色を経由せず自然に混ざるようRGB空間で補間する（HSV空間だと色相の遠い
-// ペアで無関係な色を経由してしまうため）。
-#define SEASONAL_MAX_COLORS 3
-
+// 季節限定LEDエフェクト: 単色モードの色を毎フレーム少しずつ変えることでクロスフェード
+// させる（RGBLIGHT本体のクリスマスエフェクトと似た「ゆっくり色が移り変わる」動き）。
+//
+// 以前は全LEDを直接rgblight_setrgb_at()+rgblight_set()で書き換えていたが、この方法は
+// RGBLIGHT本体の状態（rgblight_config）を経由しないため、スプリット同期の仕組み
+// （変更のあったconfigだけをマスターからスレーブへ送る）に乗らず、スレーブ側は
+// 「最初に一度届いた色のまま」の単色表示になってしまっていた（実機で確認）。
+// rgblight_sethsv_noeeprom()経由にすることで、RGBLIGHT本体の標準の同期経路にそのまま
+// 乗るようにしている。
 typedef struct {
-    uint8_t hue[SEASONAL_MAX_COLORS];
+    uint8_t hue[3];
     uint8_t count;  // 2または3
 } seasonal_palette_t;
 
 static seasonal_palette_t seasonal_palette_for(uint8_t effect_id) {
     switch (effect_id) {
-        // 純粋な赤(0)×緑(85)は原色すぎてビビットに見えるため、ワインレッド×深緑の
-        // 落ち着いた色合いにしている（明度・彩度も下記でさらに抑える）。
-        case KB_LED_EFFECT_CHRISTMAS: return (seasonal_palette_t){.hue = {250, 100, 0}, .count = 2};  // ワインレッド×深緑
-        case KB_LED_EFFECT_HALLOWEEN: return (seasonal_palette_t){.hue = {21, 191, 0}, .count = 2};   // オレンジ×紫
-        case KB_LED_EFFECT_NEWYEAR:   return (seasonal_palette_t){.hue = {32, 0, 0}, .count = 2};     // ゴールド×レッド
-        case KB_LED_EFFECT_EASTER:    return (seasonal_palette_t){.hue = {228, 90, 42}, .count = 3};  // パステルピンク×パステルグリーン×パステルイエロー
-        default:                      return (seasonal_palette_t){.hue = {0, 85, 0}, .count = 2};     // 万一の不正値はクリスマス相当
+        case KB_LED_EFFECT_HALLOWEEN: return (seasonal_palette_t){.hue = {21, 191, 0}, .count = 2};    // オレンジ×紫
+        case KB_LED_EFFECT_EASTER:    return (seasonal_palette_t){.hue = {228, 90, 42}, .count = 3};   // パステルピンク×パステルグリーン×パステルイエロー
+        default:                      return (seasonal_palette_t){.hue = {0, 85, 0}, .count = 2};      // 万一の不正値
     }
 }
 
+// 交互点灯: 左右のハーフ単位で交互に点灯・消灯する。
+// RGBLIGHT本体のRGBLIGHT_MODE_ALTERNATINGはLED総数を単純に2等分するため、22/24と
+// 左右非対称なこの機種では境界が1つずれ、右ハーフの先頭LEDだけ逆位相で光ってしまって
+// いた。RGBLED_SPLITの実際の境界を使って左右を正しく分ける。
+// オン/オフの位相はsync_timer_read()（スプリット間で共有される時計）から両ハーフが
+// それぞれ独立に計算するため、明示的な同期通信をしなくても揃って交互点灯する
+// （左右で異なる値を書き込む必要があるため、色情報が同期されるrgblight_sethsv経由の
+// 方式ではなく、各ハーフが自分のLED範囲だけを直接書き換える）。
+#if defined(SPLIT_KEYBOARD) && defined(RGBLED_SPLIT)
+static void keyball_alternating_halves_render(uint8_t hue, uint8_t sat, uint8_t val) {
+    static const uint8_t split[2] = RGBLED_SPLIT;  // {左の個数, 右の個数}
+    bool    left     = is_keyboard_left();
+    uint8_t my_start = left ? 0 : split[0];
+    uint8_t my_count = left ? split[0] : split[1];
+
+    const uint16_t phase_ms = 500;  // 従来のRGBLIGHT_MODE_ALTERNATINGと同じ間隔
+    bool           phase_a  = ((sync_timer_read() / phase_ms) % 2) == 0;
+    bool           i_am_on  = (phase_a == left);  // 左右で必ず逆になる
+
+    rgb_t rgb = i_am_on ? hsv_to_rgb((hsv_t){.h = hue, .s = sat, .v = val}) : (rgb_t){0, 0, 0};
+    for (uint8_t i = 0; i < my_count; i++) {
+        rgblight_setrgb_at(rgb.r, rgb.g, rgb.b, my_start + i);
+    }
+    rgblight_set();
+}
+#else
+// 左右分割LEDの構成が無い機種では全体を一括で明滅させる（フォールバック）。
+static void keyball_alternating_halves_render(uint8_t hue, uint8_t sat, uint8_t val) {
+    const uint16_t phase_ms = 500;
+    bool           i_am_on  = ((sync_timer_read() / phase_ms) % 2) == 0;
+    rgb_t          rgb      = i_am_on ? hsv_to_rgb((hsv_t){.h = hue, .s = sat, .v = val}) : (rgb_t){0, 0, 0};
+    for (uint8_t i = 0; i < RGBLIGHT_LED_COUNT; i++) rgblight_setrgb_at(rgb.r, rgb.g, rgb.b, i);
+    rgblight_set();
+}
+#endif
+
 // パレットの色数に関わらず同じ巡回ロジックで描画する。2色の場合は
-// 「0→1→0→1…」と巡回するだけで、従来のピンポン往復と体感上同じ動きになる。
+// 「0→1→0→1…」と巡回するだけで、ピンポン往復と体感上同じ動きになる。
 static uint8_t  g_seasonal_pos       = 0;  // 0 .. (32*count - 1) を巡回
 static uint16_t g_seasonal_last_tick = 0;
 
@@ -632,14 +668,16 @@ void keyball_seasonal_led_task(void) {
     uint8_t        hl       = get_highest_layer(layer_state);
     kb_layer_led_t override = kb_layer_led_enable_get() ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
 
-    uint8_t effect_id, sat, val, speed;
+    uint8_t effect_id, hue, sat, val, speed;
     if (override.enabled) {
         effect_id = override.effect_id;
+        hue       = override.hue;
         sat       = override.sat;
         val       = override.val;
         speed     = override.speed;
     } else {
         effect_id = kb_led_effect_id_get();
+        hue       = rgblight_get_hue();
         sat       = rgblight_get_sat();
         val       = rgblight_get_val();
         speed     = rgblight_get_speed();
@@ -651,15 +689,19 @@ void keyball_seasonal_led_task(void) {
     if (timer_elapsed(g_seasonal_last_tick) < interval) return;
     g_seasonal_last_tick = timer_read();
 
-    if (effect_id == KB_LED_EFFECT_CHRISTMAS) {
-        // 「ビビットすぎる」との指摘を受け、彩度・明度を抑えて上品な見た目にする。
-        sat = (uint8_t)((uint16_t)sat * 200 / 255);
-        val = (uint8_t)((uint16_t)val * 210 / 255);
+    if (effect_id == KB_LED_EFFECT_ALTERNATING) {
+        keyball_alternating_halves_render(hue, sat, val);
+        return;
     }
 
-    seasonal_palette_t pal    = seasonal_palette_for(effect_id);
-    const uint8_t       max_pos = 32;
-    uint8_t              total   = max_pos * pal.count;
+    if (effect_id == KB_LED_EFFECT_EASTER) {
+        // パステル調にするため彩度を大きく抑える（本人の希望でより淡く）。
+        sat = (uint8_t)((uint16_t)sat * 90 / 255);
+    }
+
+    seasonal_palette_t pal     = seasonal_palette_for(effect_id);
+    const uint8_t      max_pos = 32;
+    uint8_t             total   = max_pos * pal.count;
     if (g_seasonal_pos >= total) g_seasonal_pos = 0;  // count変更直後の安全策
 
     uint8_t segment   = g_seasonal_pos / max_pos;
@@ -667,28 +709,21 @@ void keyball_seasonal_led_task(void) {
     uint8_t hue_from  = pal.hue[segment];
     uint8_t hue_to    = pal.hue[(segment + 1) % pal.count];
 
-    rgb_t rgb_a = hsv_to_rgb((hsv_t){.h = hue_from, .s = sat, .v = val});
-    rgb_t rgb_b = hsv_to_rgb((hsv_t){.h = hue_to, .s = sat, .v = val});
+    // 色相を円環上の短い経路で補間する（例: 21→191の場合、遠回りせず255側から回る）。
+    // 直接補間すると無関係な色を経由してしまうことがあるため。
+    int16_t diff = (int16_t)hue_to - (int16_t)hue_from;
+    if (diff > 128) diff -= 256;
+    if (diff < -128) diff += 256;
 
-    uint32_t xa = (uint32_t)local_pos * local_pos * local_pos;
-    uint32_t xb = (uint32_t)(max_pos - local_pos) * (max_pos - local_pos) * (max_pos - local_pos);
-    uint8_t  t  = (uint8_t)(((uint32_t)255 * xa) / (xa + xb));  // 0-255の補間係数
+    const uint8_t max_pos_bezier = max_pos;
+    uint32_t      xa             = (uint32_t)local_pos * local_pos * local_pos;
+    uint32_t      xb             = (uint32_t)(max_pos_bezier - local_pos) * (max_pos_bezier - local_pos) * (max_pos_bezier - local_pos);
+    uint8_t       t              = (uint8_t)(((uint32_t)255 * xa) / (xa + xb));  // 0-255の補間係数
 
-    uint8_t r1 = rgb_a.r + (uint8_t)(((int16_t)rgb_b.r - rgb_a.r) * t / 255);
-    uint8_t g1 = rgb_a.g + (uint8_t)(((int16_t)rgb_b.g - rgb_a.g) * t / 255);
-    uint8_t b1 = rgb_a.b + (uint8_t)(((int16_t)rgb_b.b - rgb_a.b) * t / 255);
-    uint8_t r2 = rgb_b.r + (uint8_t)(((int16_t)rgb_a.r - rgb_b.r) * t / 255);
-    uint8_t g2 = rgb_b.g + (uint8_t)(((int16_t)rgb_a.g - rgb_b.g) * t / 255);
-    uint8_t b2 = rgb_b.b + (uint8_t)(((int16_t)rgb_a.b - rgb_b.b) * t / 255);
+    uint8_t blended_hue = (uint8_t)(hue_from + (diff * (int32_t)t) / 255);
 
-    for (uint8_t i = 0; i < RGBLIGHT_LED_COUNT; i++) {
-        if ((i / 4) % 2) {
-            rgblight_setrgb_at(r1, g1, b1, i);
-        } else {
-            rgblight_setrgb_at(r2, g2, b2, i);
-        }
-    }
-    rgblight_set();
+    rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
+    rgblight_sethsv_noeeprom(blended_hue, sat, val);
 
     g_seasonal_pos = (uint8_t)((g_seasonal_pos + 1) % total);
 }

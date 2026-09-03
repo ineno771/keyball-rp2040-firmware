@@ -52,14 +52,17 @@ void kb_hid_receive(uint8_t *data, uint8_t length);
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id);
 uint8_t kb_hid_led_effect_count(void);
 
-// 季節限定エフェクト（ハロウィン等）。RGBLIGHT本体のクリスマスは色相が赤/緑固定で
-// 単色として見た目がビビットすぎるため、クリスマス(7)もこちらの自作クロスフェード
-// （落ち着いた色合いを個別に選べる）に含める。kb_hid_led_effect_to_mode()では
-// いずれも0（オフ相当）が返り、実際の描画はkeyball_seasonal_led_task()が別途行う。
-#define KB_LED_EFFECT_CHRISTMAS      7
+// 自作描画エフェクト（季節限定のハロウィン・イースターと、左右で交互に光る交互点灯）。
+// RGBLIGHT本体のモードとしては存在しない（kb_hid_led_effect_to_mode()では0＝オフ相当が
+// 返る）ため、実際の描画はkeyball_seasonal_led_task()が別途行う。
+// - 交互点灯(10)は元々RGBLIGHT本体のRGBLIGHT_MODE_ALTERNATINGだったが、LED総数を
+//   単純に2等分するため左右非対称（22/24分割）のこの機種では境界がずれてしまい、
+//   自作の左右ハーフ単位の交互点灯に置き換えた。
+// - クリスマス(7)はRGBLIGHT本体のモードのまま（自作版は挙動が不安定だったため元に戻した）。
+// - ニューイヤーは削除済み。12は欠番。
+#define KB_LED_EFFECT_ALTERNATING    10
 #define KB_LED_EFFECT_HALLOWEEN      11
-#define KB_LED_EFFECT_NEWYEAR        12
 #define KB_LED_EFFECT_EASTER         13
-#define KB_LED_EFFECT_TOTAL_COUNT    14  // 有効なeffect_idの総数（0-13）
+#define KB_LED_EFFECT_TOTAL_COUNT    14  // 有効なeffect_idの総数（0-13。12は欠番）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif
