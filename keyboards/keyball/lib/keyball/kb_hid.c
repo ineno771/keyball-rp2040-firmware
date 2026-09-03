@@ -30,6 +30,34 @@ static uint8_t get_model_id(void) {
     return (uint8_t)KEYBALL_MODEL;
 }
 
+#if defined(RGBLIGHT_ENABLE) && !defined(RGB_MATRIX_ENABLE)
+// エフェクトID対応表（Web側のID⇔QMKのRGBLIGHT_MODE_*）。
+// GET/SET_LEDだけでなく、レイヤー連動LED（keymap.c）からも参照する唯一の変換元。
+#define LED_EFFECT_COUNT 11
+static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
+    0,                             //  0: オフ
+    RGBLIGHT_MODE_STATIC_LIGHT,    //  1: 単色
+    RGBLIGHT_MODE_BREATHING,       //  2: 呼吸
+    RGBLIGHT_MODE_RAINBOW_MOOD,    //  3: レインボー
+    RGBLIGHT_MODE_RAINBOW_SWIRL,   //  4: スワール
+    RGBLIGHT_MODE_SNAKE,           //  5: スネーク
+    RGBLIGHT_MODE_KNIGHT,          //  6: ナイトライダー
+    RGBLIGHT_MODE_CHRISTMAS,       //  7: クリスマス
+    RGBLIGHT_MODE_STATIC_GRADIENT, //  8: グラデーション
+    RGBLIGHT_MODE_TWINKLE,         //  9: きらめき
+    RGBLIGHT_MODE_ALTERNATING,     // 10: 交互点灯
+};
+
+uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id) {
+    if (effect_id >= LED_EFFECT_COUNT) effect_id = 0;
+    return LED_EFFECT_MAP[effect_id];
+}
+
+uint8_t kb_hid_led_effect_count(void) {
+    return LED_EFFECT_COUNT;
+}
+#endif
+
 void kb_hid_receive(uint8_t *data, uint8_t length) {
     uint8_t response[RAW_PACKET_SIZE] = {0};
     uint8_t cmd = data[0];
@@ -201,14 +229,8 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 #elif defined(RGBLIGHT_ENABLE)
-        // エフェクトID対応表（0:オフ 1:単色 2:呼吸 3:レインボー）
-#define LED_EFFECT_COUNT 4
-        static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
-            0,
-            RGBLIGHT_MODE_STATIC_LIGHT,
-            RGBLIGHT_MODE_BREATHING,
-            RGBLIGHT_MODE_RAINBOW_MOOD,
-        };
+        // エフェクトID対応表はファイル先頭のLED_EFFECT_MAP（file-scope）を使う。
+        // レイヤー連動LED（0x1A-0x1D）からも同じ表を参照するため。
 
         // 0x0B: LED設定を返す
         // 応答: [cmd, effect_id, hue, sat, val, speed, status]
@@ -240,6 +262,59 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
                 rgblight_sethsv(data[2], data[3], data[4]);
                 rgblight_set_speed(data[5]);
             }
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x1A: レイヤー連動LED機能の有効/無効を返す
+        // 応答: [cmd, enabled, status]
+        case KB_HID_CMD_GET_LAYER_LED_ENABLE: {
+            response[1] = kb_layer_led_enable_get() ? 1 : 0;
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x1B: レイヤー連動LED機能の有効/無効を変更してEEPROMに保存する
+        // 要求: [cmd, enabled]
+        // 応答: [cmd, status]
+        case KB_HID_CMD_SET_LAYER_LED_ENABLE: {
+            kb_layer_led_enable_set(data[1] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x1C: 指定レイヤー(1-7)のLED設定を返す
+        // 要求: [cmd, layer]
+        // 応答: [cmd, layer, enabled, effect_id, hue, sat, val, speed, status]
+        case KB_HID_CMD_GET_LAYER_LED: {
+            uint8_t        layer = data[1];
+            kb_layer_led_t cfg   = kb_layer_led_get(layer);
+            response[1] = layer;
+            response[2] = cfg.enabled;
+            response[3] = cfg.effect_id;
+            response[4] = cfg.hue;
+            response[5] = cfg.sat;
+            response[6] = cfg.val;
+            response[7] = cfg.speed;
+            response[8] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x1D: 指定レイヤー(1-7)のLED設定を変更してEEPROMに保存する
+        // 要求: [cmd, layer, enabled, effect_id, hue, sat, val, speed]
+        // 応答: [cmd, status]
+        case KB_HID_CMD_SET_LAYER_LED: {
+            uint8_t        layer     = data[1];
+            uint8_t        effect_id = data[3] < LED_EFFECT_COUNT ? data[3] : 0;
+            kb_layer_led_t cfg       = {
+                .enabled   = data[2] != 0,
+                .effect_id = effect_id,
+                .hue       = data[4],
+                .sat       = data[5],
+                .val       = data[6],
+                .speed     = data[7],
+            };
+            kb_layer_led_set(layer, &cfg);
             response[1] = KB_HID_STATUS_OK;
             break;
         }

@@ -14,13 +14,13 @@
 extern uint8_t kb_aml_threshold;
 #endif
 
-// レイヤー切替通知LED演出: 切り替わった瞬間だけ一時的に光らせる
+// レイヤー連動LED: 有効化しているレイヤーに専用の光り方を設定していると、
+// そのレイヤーにいる間ずっとその光り方になる（抜けると通常のLED設定に戻る）。
+// 無効時・専用設定なしレイヤーでは何もしない（従来どおり通常のLED設定のまま）。
 #ifdef RGBLIGHT_ENABLE
-#define LAYER_FLASH_MS 200
-static bool     g_layer_flash_active = false;
-static uint16_t g_layer_flash_timer = 0;
-static uint8_t  g_layer_flash_saved_mode;
-static uint8_t  g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val;
+static bool    g_layer_led_overriding   = false;  // 現在レイヤー専用の光り方を表示中か
+static uint8_t g_layer_led_base_mode;              // 抜けた時に戻す「通常」の光り方
+static uint8_t g_layer_led_base_hue, g_layer_led_base_sat, g_layer_led_base_val;
 #endif
 
 #ifdef GESTURE_ENABLE
@@ -198,23 +198,30 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
 layer_state_t layer_state_set_user(layer_state_t state) {
     uint8_t hl = get_highest_layer(state);
 
-    // レイヤー切替通知LED演出: 切り替わった瞬間だけ一時的に光らせる
-    static uint8_t last_layer_for_flash = 0;
-    if (hl != last_layer_for_flash) {
-        last_layer_for_flash = hl;
 #ifdef RGBLIGHT_ENABLE
-        if (!g_layer_flash_active) {
-            g_layer_flash_saved_mode = rgblight_get_mode();
-            g_layer_flash_saved_hue  = rgblight_get_hue();
-            g_layer_flash_saved_sat  = rgblight_get_sat();
-            g_layer_flash_saved_val  = rgblight_get_val();
+    // レイヤー連動LED: 有効かつ現在のレイヤーに専用設定があれば、そのレイヤーに
+    // いる間ずっとその光り方にする。なければ（無効時も含め）通常のLED設定に戻す。
+    kb_layer_led_t layer_led   = { .enabled = 0 };
+    bool           layer_led_on = kb_layer_led_enable_get();
+    if (layer_led_on) layer_led = kb_layer_led_get(hl);
+
+    if (layer_led_on && layer_led.enabled) {
+        if (!g_layer_led_overriding) {
+            // 通常時の光り方を退避しておく（レイヤーを抜けたら戻す用）
+            g_layer_led_base_mode = rgblight_get_mode();
+            g_layer_led_base_hue  = rgblight_get_hue();
+            g_layer_led_base_sat  = rgblight_get_sat();
+            g_layer_led_base_val  = rgblight_get_val();
+            g_layer_led_overriding = true;
         }
-        g_layer_flash_active = true;
-        g_layer_flash_timer  = timer_read();
-        rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
-        rgblight_sethsv_noeeprom((uint16_t)hl * 32, 255, 255);
-#endif
+        rgblight_mode_noeeprom(kb_hid_led_effect_to_mode(layer_led.effect_id));
+        rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
+    } else if (g_layer_led_overriding) {
+        rgblight_mode_noeeprom(g_layer_led_base_mode);
+        rgblight_sethsv_noeeprom(g_layer_led_base_hue, g_layer_led_base_sat, g_layer_led_base_val);
+        g_layer_led_overriding = false;
     }
+#endif
 
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）
     keyball_set_precision_layer(kb_precision_layer_get() == hl);  // 設定レイヤーで超低速モード
@@ -230,15 +237,6 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 
 void matrix_scan_user(void) {
-#ifdef RGBLIGHT_ENABLE
-    // レイヤー切替通知LED演出: 一定時間経過したら元の光り方に戻す
-    if (g_layer_flash_active && timer_elapsed(g_layer_flash_timer) > LAYER_FLASH_MS) {
-        rgblight_mode_noeeprom(g_layer_flash_saved_mode);
-        rgblight_sethsv_noeeprom(g_layer_flash_saved_hue, g_layer_flash_saved_sat, g_layer_flash_saved_val);
-        g_layer_flash_active = false;
-    }
-#endif
-
 #ifdef GESTURE_ENABLE
     // ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定
     if (g_gesture_pending) {

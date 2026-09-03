@@ -31,6 +31,10 @@
 #define KB_HID_CMD_GET_VERSION    0x17  // ファームウェアのバージョン取得（major.minor.patch）
 #define KB_HID_CMD_GET_PRECISION  0x18  // 超低速モードのCPI分周値取得
 #define KB_HID_CMD_SET_PRECISION  0x19  // 超低速モードのCPI分周値変更
+#define KB_HID_CMD_GET_LAYER_LED_ENABLE 0x1A  // レイヤー連動LED機能の有効/無効取得
+#define KB_HID_CMD_SET_LAYER_LED_ENABLE 0x1B  // レイヤー連動LED機能の有効/無効変更
+#define KB_HID_CMD_GET_LAYER_LED        0x1C  // 指定レイヤーのLED設定取得
+#define KB_HID_CMD_SET_LAYER_LED        0x1D  // 指定レイヤーのLED設定変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
@@ -40,3 +44,11 @@
 #define KB_HID_PROTOCOL_VERSION 0x01
 
 void kb_hid_receive(uint8_t *data, uint8_t length);
+
+#ifdef RGBLIGHT_ENABLE
+// GET/SET_LED・GET/SET_LAYER_LEDで使うeffect_id（0=オフ 1=単色 ...）を
+// 実際のRGBLIGHT_MODE_*定数に変換する。範囲外のIDは0（オフ相当）扱い。
+// kb_hid.cとkeymap.c(レイヤー連動LED)の両方から使う唯一の変換元。
+uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id);
+uint8_t kb_hid_led_effect_count(void);
+#endif

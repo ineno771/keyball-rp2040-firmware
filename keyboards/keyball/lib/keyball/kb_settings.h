@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 // TD config (0x0200-0x023F, 64 bytes) の直後に配置
 // kb_settings は 16バイト（0x0240-0x024F）。マクロ領域(0x0250)の直前まで。
@@ -82,3 +83,28 @@ void    kb_precision_div_set(uint8_t v);
 // PRC_MOキーとは独立に働き、どちらか一方でも条件を満たせば超低速モードになる。
 uint8_t kb_precision_layer_get(void);
 void    kb_precision_layer_set(uint8_t v);
+
+// ── レイヤー連動LED（レイヤーごとに異なる光り方を設定できる機能）──────────
+// 有効フラグ1バイト + レイヤー1-7それぞれ6バイトのテーブル（レイヤー0は
+// 通常のLED設定＝GET/SET_LEDの値をそのまま使うので対象外）。
+#define KB_LAYER_LED_ENABLE_EEPROM 0x03E6  // 機能そのものの有効/無効
+#define KB_LAYER_LED_TABLE_EEPROM  0x03E7  // レイヤー別LED設定テーブル先頭（0x03E7-0x0410、42バイト）
+#define KB_LAYER_LED_MAX_LAYER     7       // 対象レイヤーの最大値（1-7）
+#define KB_LAYER_LED_ENTRY_SIZE    6        // 1レイヤーあたりのバイト数
+
+typedef struct {
+    uint8_t enabled;    // このレイヤーで専用の光り方を使うか（0/1）
+    uint8_t effect_id;  // GET/SET_LEDと同じエフェクトID体系
+    uint8_t hue;
+    uint8_t sat;
+    uint8_t val;
+    uint8_t speed;
+} __attribute__((packed)) kb_layer_led_t;
+
+// レイヤー連動LED機能そのものの有効/無効（既定: 無効）
+bool kb_layer_led_enable_get(void);
+void kb_layer_led_enable_set(bool v);
+
+// レイヤーN（1-KB_LAYER_LED_MAX_LAYER）のLED設定を取得・変更する（既定: enabled=0）
+kb_layer_led_t kb_layer_led_get(uint8_t layer);
+void           kb_layer_led_set(uint8_t layer, const kb_layer_led_t *cfg);
