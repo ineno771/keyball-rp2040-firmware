@@ -42,7 +42,7 @@ static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
     RGBLIGHT_MODE_RAINBOW_SWIRL,   //  4: スワール
     RGBLIGHT_MODE_SNAKE,           //  5: スネーク
     RGBLIGHT_MODE_KNIGHT,          //  6: ナイトライダー
-    RGBLIGHT_MODE_CHRISTMAS,       //  7: クリスマス
+    0,                             //  7: クリスマス（季節限定エフェクトとして自作描画。下記参照）
     RGBLIGHT_MODE_STATIC_GRADIENT, //  8: グラデーション
     RGBLIGHT_MODE_TWINKLE,         //  9: きらめき
     RGBLIGHT_MODE_ALTERNATING,     // 10: 交互点灯
@@ -58,7 +58,7 @@ uint8_t kb_hid_led_effect_count(void) {
 }
 
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id) {
-    return effect_id >= KB_LED_EFFECT_HALLOWEEN && effect_id < KB_LED_EFFECT_TOTAL_COUNT;
+    return effect_id == KB_LED_EFFECT_CHRISTMAS || (effect_id >= KB_LED_EFFECT_HALLOWEEN && effect_id < KB_LED_EFFECT_TOTAL_COUNT);
 }
 #endif
 

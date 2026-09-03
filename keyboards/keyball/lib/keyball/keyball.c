@@ -600,17 +600,28 @@ void keyball_set_precision_layer(bool on) {
 // 同じキュービックベジェのイージングで2色をクロスフェードするが、色相が離れたテーマ
 // ペアでも虹色を経由せず自然に混ざるようRGB空間で補間する（HSV空間だと色相の遠い
 // ペアで無関係な色を経由してしまうため）。
-static void seasonal_pair_for(uint8_t effect_id, uint8_t *hue_a, uint8_t *hue_b) {
+#define SEASONAL_MAX_COLORS 3
+
+typedef struct {
+    uint8_t hue[SEASONAL_MAX_COLORS];
+    uint8_t count;  // 2または3
+} seasonal_palette_t;
+
+static seasonal_palette_t seasonal_palette_for(uint8_t effect_id) {
     switch (effect_id) {
-        case KB_LED_EFFECT_HALLOWEEN: *hue_a = 21;  *hue_b = 191; break;  // オレンジ×紫
-        case KB_LED_EFFECT_NEWYEAR:   *hue_a = 32;  *hue_b = 0;   break;  // ゴールド×レッド
-        case KB_LED_EFFECT_EASTER:    *hue_a = 228; *hue_b = 42;  break;  // パステルピンク×パステルイエロー
-        default:                      *hue_a = 0;   *hue_b = 85;  break; // 万一の不正値はクリスマス相当
+        // 純粋な赤(0)×緑(85)は原色すぎてビビットに見えるため、ワインレッド×深緑の
+        // 落ち着いた色合いにしている（明度・彩度も下記でさらに抑える）。
+        case KB_LED_EFFECT_CHRISTMAS: return (seasonal_palette_t){.hue = {250, 100, 0}, .count = 2};  // ワインレッド×深緑
+        case KB_LED_EFFECT_HALLOWEEN: return (seasonal_palette_t){.hue = {21, 191, 0}, .count = 2};   // オレンジ×紫
+        case KB_LED_EFFECT_NEWYEAR:   return (seasonal_palette_t){.hue = {32, 0, 0}, .count = 2};     // ゴールド×レッド
+        case KB_LED_EFFECT_EASTER:    return (seasonal_palette_t){.hue = {228, 90, 42}, .count = 3};  // パステルピンク×パステルグリーン×パステルイエロー
+        default:                      return (seasonal_palette_t){.hue = {0, 85, 0}, .count = 2};     // 万一の不正値はクリスマス相当
     }
 }
 
-static uint8_t  g_seasonal_pos       = 0;
-static int8_t   g_seasonal_dir       = 1;
+// パレットの色数に関わらず同じ巡回ロジックで描画する。2色の場合は
+// 「0→1→0→1…」と巡回するだけで、従来のピンポン往復と体感上同じ動きになる。
+static uint8_t  g_seasonal_pos       = 0;  // 0 .. (32*count - 1) を巡回
 static uint16_t g_seasonal_last_tick = 0;
 
 void keyball_seasonal_led_task(void) {
@@ -640,15 +651,28 @@ void keyball_seasonal_led_task(void) {
     if (timer_elapsed(g_seasonal_last_tick) < interval) return;
     g_seasonal_last_tick = timer_read();
 
-    uint8_t hue_a, hue_b;
-    seasonal_pair_for(effect_id, &hue_a, &hue_b);
-    rgb_t rgb_a = hsv_to_rgb((hsv_t){.h = hue_a, .s = sat, .v = val});
-    rgb_t rgb_b = hsv_to_rgb((hsv_t){.h = hue_b, .s = sat, .v = val});
+    if (effect_id == KB_LED_EFFECT_CHRISTMAS) {
+        // 「ビビットすぎる」との指摘を受け、彩度・明度を抑えて上品な見た目にする。
+        sat = (uint8_t)((uint16_t)sat * 200 / 255);
+        val = (uint8_t)((uint16_t)val * 210 / 255);
+    }
 
-    const uint8_t max_pos = 32;
-    uint32_t      xa      = (uint32_t)g_seasonal_pos * g_seasonal_pos * g_seasonal_pos;
-    uint32_t      xb      = (uint32_t)(max_pos - g_seasonal_pos) * (max_pos - g_seasonal_pos) * (max_pos - g_seasonal_pos);
-    uint8_t       t       = (uint8_t)(((uint32_t)255 * xa) / (xa + xb));  // 0-255の補間係数
+    seasonal_palette_t pal    = seasonal_palette_for(effect_id);
+    const uint8_t       max_pos = 32;
+    uint8_t              total   = max_pos * pal.count;
+    if (g_seasonal_pos >= total) g_seasonal_pos = 0;  // count変更直後の安全策
+
+    uint8_t segment   = g_seasonal_pos / max_pos;
+    uint8_t local_pos = g_seasonal_pos % max_pos;
+    uint8_t hue_from  = pal.hue[segment];
+    uint8_t hue_to    = pal.hue[(segment + 1) % pal.count];
+
+    rgb_t rgb_a = hsv_to_rgb((hsv_t){.h = hue_from, .s = sat, .v = val});
+    rgb_t rgb_b = hsv_to_rgb((hsv_t){.h = hue_to, .s = sat, .v = val});
+
+    uint32_t xa = (uint32_t)local_pos * local_pos * local_pos;
+    uint32_t xb = (uint32_t)(max_pos - local_pos) * (max_pos - local_pos) * (max_pos - local_pos);
+    uint8_t  t  = (uint8_t)(((uint32_t)255 * xa) / (xa + xb));  // 0-255の補間係数
 
     uint8_t r1 = rgb_a.r + (uint8_t)(((int16_t)rgb_b.r - rgb_a.r) * t / 255);
     uint8_t g1 = rgb_a.g + (uint8_t)(((int16_t)rgb_b.g - rgb_a.g) * t / 255);
@@ -666,12 +690,7 @@ void keyball_seasonal_led_task(void) {
     }
     rgblight_set();
 
-    if (g_seasonal_pos == 0) {
-        g_seasonal_dir = 1;
-    } else if (g_seasonal_pos == max_pos) {
-        g_seasonal_dir = -1;
-    }
-    g_seasonal_pos += g_seasonal_dir;
+    g_seasonal_pos = (uint8_t)((g_seasonal_pos + 1) % total);
 }
 #endif
 
