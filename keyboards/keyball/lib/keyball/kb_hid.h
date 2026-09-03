@@ -52,15 +52,17 @@ void kb_hid_receive(uint8_t *data, uint8_t length);
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id);
 uint8_t kb_hid_led_effect_count(void);
 
-// 自作描画エフェクト（季節限定のハロウィン・イースターと、左右で交互に光る交互点灯）。
-// RGBLIGHT本体のモードとしては存在しない（kb_hid_led_effect_to_mode()では0＝オフ相当が
-// 返る）ため、実際の描画はkeyball_seasonal_led_task()が別途行う。
-// - 交互点灯(10)は元々RGBLIGHT本体のRGBLIGHT_MODE_ALTERNATINGだったが、LED総数を
-//   単純に2等分するため左右非対称（22/24分割）のこの機種では境界がずれてしまい、
-//   自作の左右ハーフ単位の交互点灯に置き換えた。
+// 季節限定エフェクト（ハロウィン・イースター）。RGBLIGHT本体のモードとしては存在しない
+// （kb_hid_led_effect_to_mode()では0＝オフ相当が返る）ため、実際の描画は
+// keyball_seasonal_led_task()が別途行う。
 // - クリスマス(7)はRGBLIGHT本体のモードのまま（自作版は挙動が不安定だったため元に戻した）。
-// - ニューイヤーは削除済み。12は欠番。
-#define KB_LED_EFFECT_ALTERNATING    10
+// - ニューイヤー(12)・ナイトライダー(6)は削除済み。欠番。
+// - 交互点灯(10)はRGBLIGHT本体のRGBLIGHT_MODE_ALTERNATINGのまま（kb_hid_led_effect_to_mode
+//   経由で通常どおりマッピングされる）。ただしLED総数を単純に2等分するため左右非対称
+//   （22/24分割）のこの機種では本体の描画だと境界がずれるため、keyball_seasonal_led_task()
+//   がrgblight_get_mode()==RGBLIGHT_MODE_ALTERNATINGを検知して左右ハーフ単位の描画で
+//   上書きする（本体のモード自体は実モードのままなので、スプリットのスレーブ側でも
+//   標準の同期経路で確実に検知できる）。
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
 #define KB_LED_EFFECT_TOTAL_COUNT    14  // 有効なeffect_idの総数（0-13。12は欠番）

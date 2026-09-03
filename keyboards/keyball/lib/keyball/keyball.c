@@ -661,23 +661,34 @@ static uint8_t  g_seasonal_pos       = 0;  // 0 .. (32*count - 1) を巡回
 static uint16_t g_seasonal_last_tick = 0;
 
 void keyball_seasonal_led_task(void) {
-    // 現在の実効LED設定（レイヤー連動が有効かつ現在レイヤーに専用設定があればそちら、
-    // なければ通常のLED設定）を、layer_state_set_userに頼らずここで独立して求める。
-    // マスター側の発火（HIDコマンド・レイヤー切替はマスターでしか処理されない）に依存せず、
-    // スプリット両側のmatrix_scan_userから毎回呼ばれても正しく描画できるようにするため。
+    // 交互点灯は、他の季節限定エフェクトと違い「実際にRGBLIGHT本体のALTERNATING
+    // モードを土台として使う」ことで判定する。effect_id自体（kb_led_effect_id、
+    // EEPROM）はマスター経由でしか書き込まれずスプリットのスレーブ側では不正確な
+    // ことがあるが、rgblight_get_mode()はモード変更のたびに標準の同期経路で
+    // 常に正しくスレーブへ伝わるため、こちらを判定材料にすればスレーブ側でも
+    // 確実に検知できる。
+    if (rgblight_is_enabled() && rgblight_get_mode() == RGBLIGHT_MODE_ALTERNATING) {
+        uint16_t interval = 60 - ((uint16_t)rgblight_get_speed() * 55 / 255);  // 5〜60ms
+        if (timer_elapsed(g_seasonal_last_tick) < interval) return;
+        g_seasonal_last_tick = timer_read();
+        keyball_alternating_halves_render(rgblight_get_hue(), rgblight_get_sat(), rgblight_get_val());
+        return;
+    }
+
+    // 以下はハロウィン・イースター。こちらはeffect_idの解決がスレーブ側で不正確でも、
+    // マスターが毎フレームrgblight_sethsv_noeeprom()で色を押し出すことで標準の同期
+    // 経路にそのまま乗るため実害がない（詳細はファイル冒頭のコメント参照）。
     uint8_t        hl       = get_highest_layer(layer_state);
     kb_layer_led_t override = kb_layer_led_enable_get() ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
 
-    uint8_t effect_id, hue, sat, val, speed;
+    uint8_t effect_id, sat, val, speed;
     if (override.enabled) {
         effect_id = override.effect_id;
-        hue       = override.hue;
         sat       = override.sat;
         val       = override.val;
         speed     = override.speed;
     } else {
         effect_id = kb_led_effect_id_get();
-        hue       = rgblight_get_hue();
         sat       = rgblight_get_sat();
         val       = rgblight_get_val();
         speed     = rgblight_get_speed();
@@ -688,16 +699,6 @@ void keyball_seasonal_led_task(void) {
     uint16_t interval = 60 - ((uint16_t)speed * 55 / 255);  // 5〜60ms（speedが大きいほど速い）
     if (timer_elapsed(g_seasonal_last_tick) < interval) return;
     g_seasonal_last_tick = timer_read();
-
-    if (effect_id == KB_LED_EFFECT_ALTERNATING) {
-        keyball_alternating_halves_render(hue, sat, val);
-        return;
-    }
-
-    if (effect_id == KB_LED_EFFECT_EASTER) {
-        // パステル調にするため彩度を大きく抑える（本人の希望でより淡く）。
-        sat = (uint8_t)((uint16_t)sat * 90 / 255);
-    }
 
     seasonal_palette_t pal     = seasonal_palette_for(effect_id);
     const uint8_t      max_pos = 32;

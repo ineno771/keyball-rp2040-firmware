@@ -45,7 +45,7 @@ static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
     RGBLIGHT_MODE_CHRISTMAS,       //  7: クリスマス
     RGBLIGHT_MODE_STATIC_GRADIENT, //  8: グラデーション
     RGBLIGHT_MODE_TWINKLE,         //  9: きらめき
-    0,                             // 10: 交互点灯（左右ハーフ単位の自作描画。下記参照）
+    RGBLIGHT_MODE_ALTERNATING,     // 10: 交互点灯（実モードは維持しつつ左右ハーフ単位の描画で上書きする。下記参照）
 };
 
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id) {
@@ -58,7 +58,7 @@ uint8_t kb_hid_led_effect_count(void) {
 }
 
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id) {
-    return effect_id == KB_LED_EFFECT_ALTERNATING || effect_id == KB_LED_EFFECT_HALLOWEEN || effect_id == KB_LED_EFFECT_EASTER;
+    return effect_id == KB_LED_EFFECT_HALLOWEEN || effect_id == KB_LED_EFFECT_EASTER;
 }
 #endif
 
