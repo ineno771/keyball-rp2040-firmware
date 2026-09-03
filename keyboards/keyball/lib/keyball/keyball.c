@@ -26,7 +26,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifdef RGBLIGHT_ENABLE
 #    include "kb_hid.h"
 #    include "color.h"
-#    include "sync_timer.h"
 #endif
 
 #include <string.h>
@@ -619,63 +618,13 @@ static seasonal_palette_t seasonal_palette_for(uint8_t effect_id) {
     }
 }
 
-// 交互点灯: 左右のハーフ単位で交互に点灯・消灯する。
-// RGBLIGHT本体のRGBLIGHT_MODE_ALTERNATINGはLED総数を単純に2等分するため、22/24と
-// 左右非対称なこの機種では境界が1つずれ、右ハーフの先頭LEDだけ逆位相で光ってしまって
-// いた。RGBLED_SPLITの実際の境界を使って左右を正しく分ける。
-// オン/オフの位相はsync_timer_read()（スプリット間で共有される時計）から両ハーフが
-// それぞれ独立に計算するため、明示的な同期通信をしなくても揃って交互点灯する
-// （左右で異なる値を書き込む必要があるため、色情報が同期されるrgblight_sethsv経由の
-// 方式ではなく、各ハーフが自分のLED範囲だけを直接書き換える）。
-#if defined(SPLIT_KEYBOARD) && defined(RGBLED_SPLIT)
-static void keyball_alternating_halves_render(uint8_t hue, uint8_t sat, uint8_t val) {
-    static const uint8_t split[2] = RGBLED_SPLIT;  // {左の個数, 右の個数}
-    bool    left     = is_keyboard_left();
-    uint8_t my_start = left ? 0 : split[0];
-    uint8_t my_count = left ? split[0] : split[1];
-
-    const uint16_t phase_ms = 500;  // 従来のRGBLIGHT_MODE_ALTERNATINGと同じ間隔
-    bool           phase_a  = ((sync_timer_read() / phase_ms) % 2) == 0;
-    bool           i_am_on  = (phase_a == left);  // 左右で必ず逆になる
-
-    rgb_t rgb = i_am_on ? hsv_to_rgb((hsv_t){.h = hue, .s = sat, .v = val}) : (rgb_t){0, 0, 0};
-    for (uint8_t i = 0; i < my_count; i++) {
-        rgblight_setrgb_at(rgb.r, rgb.g, rgb.b, my_start + i);
-    }
-    rgblight_set();
-}
-#else
-// 左右分割LEDの構成が無い機種では全体を一括で明滅させる（フォールバック）。
-static void keyball_alternating_halves_render(uint8_t hue, uint8_t sat, uint8_t val) {
-    const uint16_t phase_ms = 500;
-    bool           i_am_on  = ((sync_timer_read() / phase_ms) % 2) == 0;
-    rgb_t          rgb      = i_am_on ? hsv_to_rgb((hsv_t){.h = hue, .s = sat, .v = val}) : (rgb_t){0, 0, 0};
-    for (uint8_t i = 0; i < RGBLIGHT_LED_COUNT; i++) rgblight_setrgb_at(rgb.r, rgb.g, rgb.b, i);
-    rgblight_set();
-}
-#endif
-
 // パレットの色数に関わらず同じ巡回ロジックで描画する。2色の場合は
 // 「0→1→0→1…」と巡回するだけで、ピンポン往復と体感上同じ動きになる。
 static uint8_t  g_seasonal_pos       = 0;  // 0 .. (32*count - 1) を巡回
 static uint16_t g_seasonal_last_tick = 0;
 
 void keyball_seasonal_led_task(void) {
-    // 交互点灯は、他の季節限定エフェクトと違い「実際にRGBLIGHT本体のALTERNATING
-    // モードを土台として使う」ことで判定する。effect_id自体（kb_led_effect_id、
-    // EEPROM）はマスター経由でしか書き込まれずスプリットのスレーブ側では不正確な
-    // ことがあるが、rgblight_get_mode()はモード変更のたびに標準の同期経路で
-    // 常に正しくスレーブへ伝わるため、こちらを判定材料にすればスレーブ側でも
-    // 確実に検知できる。
-    if (rgblight_is_enabled() && rgblight_get_mode() == RGBLIGHT_MODE_ALTERNATING) {
-        uint16_t interval = 60 - ((uint16_t)rgblight_get_speed() * 55 / 255);  // 5〜60ms
-        if (timer_elapsed(g_seasonal_last_tick) < interval) return;
-        g_seasonal_last_tick = timer_read();
-        keyball_alternating_halves_render(rgblight_get_hue(), rgblight_get_sat(), rgblight_get_val());
-        return;
-    }
-
-    // 以下はハロウィン・イースター。こちらはeffect_idの解決がスレーブ側で不正確でも、
+    // ハロウィン・イースター。effect_idの解決がスプリットのスレーブ側で不正確でも、
     // マスターが毎フレームrgblight_sethsv_noeeprom()で色を押し出すことで標準の同期
     // 経路にそのまま乗るため実害がない（詳細はファイル冒頭のコメント参照）。
     uint8_t        hl       = get_highest_layer(layer_state);

@@ -45,7 +45,7 @@ static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
     RGBLIGHT_MODE_CHRISTMAS,       //  7: クリスマス
     RGBLIGHT_MODE_STATIC_GRADIENT, //  8: グラデーション
     RGBLIGHT_MODE_TWINKLE,         //  9: きらめき
-    RGBLIGHT_MODE_ALTERNATING,     // 10: 交互点灯（実モードは維持しつつ左右ハーフ単位の描画で上書きする。下記参照）
+    RGBLIGHT_MODE_ALTERNATING,     // 10: 交互点灯（本体そのまま。左右ハーフ単位への対応は一旦見送り）
 };
 
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id) {
