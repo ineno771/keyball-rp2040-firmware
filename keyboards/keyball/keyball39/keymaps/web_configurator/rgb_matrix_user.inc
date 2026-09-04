@@ -26,43 +26,44 @@ static bool SOLID_RIPPLE(effect_params_t* params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
 
     // ヒット検出用 static state（各サイドが独立して保持）
-    // prev_tick: 0xFFFF 初期値により最初のヒット（tick=0）も正しく検出される
-    static uint16_t prev_tick[8] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
-                                    0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
     static uint8_t  rip_x[RIPPLE_MAX_HITS];
     static uint8_t  rip_y[RIPPLE_MAX_HITS];
+    static uint8_t  rip_index[RIPPLE_MAX_HITS];  // 起点キーのLEDインデックス（左右境界判定に使用）
     static uint16_t rip_start[RIPPLE_MAX_HITS];
     static bool     rip_active[RIPPLE_MAX_HITS];
     static uint8_t  rip_next = 0;
 
-    // g_last_hit_tracker からキーダウン/アップを検出
-    // tick がリセット（cur < prev）されたスロット = 新規イベント
-    // ただし key-up も同座標でリセットされるため、同位置300ms以内の重複は除外する
+    // g_last_hit_tracker から新規ヒットを検出する。
+    // 【v2】以前は「前フレームのtickとの比較」で新規判定していたが、g_last_hit_tracker.count
+    // が8件を超えるとQMK側がバッファをシフトして古いヒットを捨てる仕様のため、スロット番号
+    // が同じヒットを指し続ける保証がなく、シフトのたびに誤って「新規ヒット」と誤検出して
+    // いた（しばらく入力を続けると挙動がおかしくなる不具合の原因）。
+    // v2ではスロットの前フレーム値と比較せず、単純に「tickが十分小さい（＝直近で登録された）
+    // ヒットか」だけを見て、同座標での重複起動は既存の300ms以内ロジックで防ぐ。
     uint8_t cnt = g_last_hit_tracker.count;
-    if (cnt > 8) cnt = 8;
+    if (cnt > RIPPLE_MAX_HITS) cnt = RIPPLE_MAX_HITS;
     for (uint8_t j = 0; j < cnt; j++) {
-        uint16_t cur = g_last_hit_tracker.tick[j];
-        if (cur < prev_tick[j]) {
-            uint8_t nx = g_last_hit_tracker.x[j];
-            uint8_t ny = g_last_hit_tracker.y[j];
-            // 同じ座標から直近300ms以内にリップルが起動済みならスキップ（key-up除外）
-            bool dup = false;
-            for (uint8_t m = 0; m < RIPPLE_MAX_HITS; m++) {
-                if (rip_active[m] && rip_x[m] == nx && rip_y[m] == ny &&
-                    timer_elapsed(rip_start[m]) < 300) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup) {
-                rip_x[rip_next]      = nx;
-                rip_y[rip_next]      = ny;
-                rip_start[rip_next]  = timer_read();
-                rip_active[rip_next] = true;
-                rip_next = (rip_next + 1) % RIPPLE_MAX_HITS;
+        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
+        uint8_t nx  = g_last_hit_tracker.x[j];
+        uint8_t ny  = g_last_hit_tracker.y[j];
+        uint8_t nix = g_last_hit_tracker.index[j];
+        // 同じ座標から直近300ms以内にリップルが起動済みならスキップ（key-up・連続検出の重複除外）
+        bool dup = false;
+        for (uint8_t m = 0; m < RIPPLE_MAX_HITS; m++) {
+            if (rip_active[m] && rip_x[m] == nx && rip_y[m] == ny &&
+                timer_elapsed(rip_start[m]) < 300) {
+                dup = true;
+                break;
             }
         }
-        prev_tick[j] = cur;
+        if (!dup) {
+            rip_x[rip_next]      = nx;
+            rip_y[rip_next]      = ny;
+            rip_index[rip_next]  = nix;
+            rip_start[rip_next]  = timer_read();
+            rip_active[rip_next] = true;
+            rip_next = (rip_next + 1) % RIPPLE_MAX_HITS;
+        }
     }
 
     // リップルごとの現在 tick を事前計算し、期限切れを deactivate
@@ -89,8 +90,14 @@ static bool SOLID_RIPPLE(effect_params_t* params) {
         hsv.v   = 0;
         for (uint8_t k = 0; k < RIPPLE_MAX_HITS; k++) {
             if (!rip_active[k]) continue;
-            // 左右スプリット境界で波紋を分離（x=112基準）
-            if ((rip_x[k] >= 112) != (g_led_config.point[i].x >= 112)) continue;
+            // 左右スプリット境界で波紋を分離。
+            // 【v2】以前はx座標が112以上かどうかの目算値で判定しており、境界付近の
+            // 座標を持つLED（アンダーグロー等）で誤判定が起き、反対側のハーフでも
+            // 光ってしまう不具合があった。RGB_MATRIX_USE_LIMITSで取得したled_min/
+            // led_max は「このハーフが実際に描画を担当するLEDインデックス範囲」を
+            // QMKが左右で正しく分けて返す値なので、これを直接使えば座標に依存せず
+            // 確実に左右を分離できる。
+            if (rip_index[k] < led_min || rip_index[k] >= led_max) continue;
             int16_t dx   = (int16_t)g_led_config.point[i].x - (int16_t)rip_x[k];
             int16_t dy   = (int16_t)g_led_config.point[i].y - (int16_t)rip_y[k];
             uint8_t adx  = dx < 0 ? (uint8_t)(-dx) : (uint8_t)dx;
