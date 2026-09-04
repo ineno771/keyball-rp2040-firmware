@@ -6,9 +6,10 @@
 #include "eeprom.h"
 #include <string.h>
 
-// EEPROM配置: KB_SETTINGS(0x0248, 8バイト)の直後
-// 400バイトのバッファ (0x0250〜0x03DF)
-#define MACRO_EEPROM_BASE 0x0250
+// EEPROM配置: KB_SETTINGS_EEPROM_BASE(0x0840, 16バイト)の直後
+// 400バイトのバッファ (0x0850〜0x09DF)。旧配置(0x0250)はdynamic_keymapの実使用領域
+// (0x0025〜0x0324)と衝突していたため2026-09-04に移動。詳細はkb_settings.h参照。
+#define MACRO_EEPROM_BASE 0x0850
 
 // ホールド中のキーを記録（マクロキー解放時にまとめてUP）
 #define MACRO_MAX_HELD 8

@@ -6,11 +6,10 @@
 #include <stdbool.h>
 #include <string.h>
 
-// 注意: KB_LAYER_LED_TABLE_EEPROM (0x03E7) 〜 +42バイト(0x0410)は、既存のscroll/gesture/
-// precision layer設定（0x03E0-0x03E5）に続く「空き領域」として使っている。dynamic keymap
-// 本体のEEPROM開始位置はQMKコア内部（nvm_dynamic_keymap.c）でのみ定義されビルド時に
-// 参照できないため、コンパイル時の衝突検知はできない。実機で書き込み・読み出しが
-// 正常に行えることを都度確認すること（既存の0x03E0台の追加時と同様の前提）。
+// 注意: KB_LAYER_LED_TABLE_EEPROM (0x09E7) 〜 +42バイト(0x0A10)は、既存のscroll/gesture/
+// precision layer設定（0x09E0-0x09E5）に続く「空き領域」として使っている。
+// EEPROM配置全体の経緯・dynamic keymapとの衝突防止についてはkb_settings.h冒頭のコメントを
+// 参照（2026-09-04に0x0200台からdynamic keymapと衝突しない0x0800台へ全面移動済み）。
 
 static kb_settings_t g_cache;
 static bool          g_loaded = false;
