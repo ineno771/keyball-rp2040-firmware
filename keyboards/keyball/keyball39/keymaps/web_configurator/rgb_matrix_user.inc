@@ -72,8 +72,10 @@ static bool SOLID_RIPPLE(effect_params_t* params) {
         rip_tick_val[k] = 0;
         if (!rip_active[k]) continue;
         uint16_t elapsed = timer_elapsed(rip_start[k]);
-        // speed設定に依存せず固定速度で計算（elapsed/4: dist=25の隣キーが100ms後に光る）
-        uint16_t t = elapsed >> 2;
+        // speed設定に依存せず固定速度で計算。
+        // 【暫定】確認しやすいよう通常の1/4速に落としている（elapsed/16）。
+        // 本実装時は元の速さ（elapsed>>2、もしくはspeed設定に連動）に戻すか検討すること。
+        uint16_t t = elapsed >> 4;
         if (t > (uint16_t)(255 + RIPPLE_TAIL_LEN)) {
             rip_active[k] = false;
         } else {
