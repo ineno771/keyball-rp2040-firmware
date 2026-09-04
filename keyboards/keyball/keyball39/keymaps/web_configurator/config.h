@@ -82,7 +82,9 @@
 // SOLID_RIPPLE用の定数（rgb_matrix_user.inc参照）
 #define RIPPLE_MAX_HITS 8   // 同時に表示できる波紋の最大数
 #define RIPPLE_TAIL_LEN 40  // 波紋の尾（フェードアウト）の長さ
-// LED実測が終わるまでは診断エフェクト固定で起動する
-#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_LED_TEST
+// LED実測が完了したので波紋エフェクトを起動時のデフォルトにする
+// （Web UIのLEDドロップダウンはまだRGBLIGHT版のID体系のままで、このRGB_MATRIX
+// ビルドの簡易6択(0-5)とは対応していないため、動作確認は起動直後の状態で行う）
+#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_SOLID_RIPPLE
 // 最大輝度（消費電力抑制、RGBLIGHT側と揃える）
 #define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
