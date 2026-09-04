@@ -57,12 +57,36 @@ static bool SOLID_RIPPLE(effect_params_t* params) {
             }
         }
         if (!dup) {
-            rip_x[rip_next]      = nx;
-            rip_y[rip_next]      = ny;
-            rip_index[rip_next]  = nix;
-            rip_start[rip_next]  = timer_read();
-            rip_active[rip_next] = true;
-            rip_next = (rip_next + 1) % RIPPLE_MAX_HITS;
+            // 空きスロットを優先して使う。全て使用中なら最も古い（表示が進んだ）ものを
+            // 上書きする。以前は空き状況を見ずに rip_next を単純にインクリメントして
+            // いたため、表示中の若い波紋を上書きして「途中で終わる」ことがあった
+            // （波紋を低速化して寿命が延びたことで、タイピング中に8個を超えやすくなり
+            // 顕在化した）。
+            uint8_t slot      = rip_next;
+            bool    found_free = false;
+            for (uint8_t m = 0; m < RIPPLE_MAX_HITS; m++) {
+                if (!rip_active[m]) {
+                    slot       = m;
+                    found_free = true;
+                    break;
+                }
+            }
+            if (!found_free) {
+                uint16_t oldest_elapsed = 0;
+                for (uint8_t m = 0; m < RIPPLE_MAX_HITS; m++) {
+                    uint16_t el = timer_elapsed(rip_start[m]);
+                    if (el >= oldest_elapsed) {
+                        oldest_elapsed = el;
+                        slot           = m;
+                    }
+                }
+            }
+            rip_x[slot]      = nx;
+            rip_y[slot]      = ny;
+            rip_index[slot]  = nix;
+            rip_start[slot]  = timer_read();
+            rip_active[slot] = true;
+            rip_next = (slot + 1) % RIPPLE_MAX_HITS;
         }
     }
 
