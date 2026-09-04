@@ -793,17 +793,15 @@ void keyboard_post_init_kb(void) {
     keyball_on_adjust_layout(KEYBALL_ADJUST_PENDING);
 
 #ifdef RGB_MATRIX_ENABLE
-    // 旧ファームウェア(RGBLIGHT)から移行した場合、EEPROMのRGB_MATRIX設定が無効になっている
-    // ことがあるため、無効の場合はデフォルト設定で有効化する
-    if (!rgb_matrix_is_enabled()) {
-        rgb_matrix_enable();
-    }
-    // 【暫定】波紋演出の動作確認用に、EEPROMに保存された発光モードを無視して毎回強制的に
-    // 波紋へ上書きする。このセッション中に複数のRGB_MATRIXビルド(LED_TEST等)を書き込んで
-    // おりEEPROMに古いモードが残っているため、RGB_MATRIX_DEFAULT_MODEだけでは反映されない
-    // （RGB_MATRIX_DEFAULT_MODEはEEPROM未初期化時のみ効く）。本実装（GET/SET_LEDの
-    // RGB_MATRIX対応）が入ったらこのブロックは削除すること。
-    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_SOLID_RIPPLE);
+    // 【暫定】波紋演出の動作確認用に、EEPROMのRGB_MATRIX設定を毎回強制的にデフォルト
+    // （波紋）へリセットする。このセッション中に複数のRGB_MATRIXビルド(LED_TEST等)を
+    // 書き込んでおりEEPROMに古い設定が残っていたため、以前はrgb_matrix_mode_noeeprom()
+    // で上書きを試みたが、この関数はrgb_matrix_config.enableが偽だと即座に何もせず
+    // 抜けてしまう仕様だった（rgb_matrix_mode_eeprom_helper内のガード）。
+    // eeconfig_update_rgb_matrix_default()はenable/mode/hsv等を直接まとめて上書きし
+    // EEPROMにも書き込むため、このガードの影響を受けず確実に反映できる。
+    // 本実装（GET/SET_LEDのRGB_MATRIX対応）が入ったらこのブロックは削除すること。
+    eeconfig_update_rgb_matrix_default();
 #endif
 
 #ifdef RGBLIGHT_ENABLE
