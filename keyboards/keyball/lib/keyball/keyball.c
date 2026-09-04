@@ -798,6 +798,12 @@ void keyboard_post_init_kb(void) {
     if (!rgb_matrix_is_enabled()) {
         rgb_matrix_enable();
     }
+    // 【暫定】波紋演出の動作確認用に、EEPROMに保存された発光モードを無視して毎回強制的に
+    // 波紋へ上書きする。このセッション中に複数のRGB_MATRIXビルド(LED_TEST等)を書き込んで
+    // おりEEPROMに古いモードが残っているため、RGB_MATRIX_DEFAULT_MODEだけでは反映されない
+    // （RGB_MATRIX_DEFAULT_MODEはEEPROM未初期化時のみ効く）。本実装（GET/SET_LEDの
+    // RGB_MATRIX対応）が入ったらこのブロックは削除すること。
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_SOLID_RIPPLE);
 #endif
 
 #ifdef RGBLIGHT_ENABLE
