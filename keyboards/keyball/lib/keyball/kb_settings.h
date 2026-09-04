@@ -4,10 +4,32 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// TD config (0x0200-0x023F, 64 bytes) の直後に配置
-// kb_settings は 16バイト（0x0240-0x024F）。マクロ領域(0x0250)の直前まで。
-#define KB_SETTINGS_EEPROM_BASE  0x0240
+// ── EEPROM配置についての重要な注意（2026-09-04発覚・移動） ──────────────
+// 以前はTD config=0x0200、kb_settings=0x0240、マクロ=0x0250…という配置だったが、
+// これはQMK標準の動的キーマップ（Keyball LinkのSET_KEYCODEで実際に書き込まれる、
+// DYNAMIC_KEYMAP_LAYER_COUNT×MATRIX_ROWS×MATRIX_COLS×2バイト分の領域）の実使用範囲
+// 0x0025〜0x0324（8層×8行×6列×2=768バイト、EECONFIG_SIZE=37バイトの直後から）と
+// 完全に重複しており、キー割り当てのたびにkb_settings本体やマクロ領域前半が静かに
+// 破壊される実害あるバグだった（「dynamic_keymapは先頭〜約0x01C0までしか使わない」
+// という当初の見積もりが誤りだった）。0x0800以降に全面移動して解消した。
+// 新配置: TD config(0x0800-0x083F,64B) → kb_settings(0x0840-0x084F,16B)
+//        → マクロ(0x0850-0x09DF,400B) → 本ファイル後半の各種設定(0x09E0-)
+// 実測方法: nvm_dynamic_keymap.cに一時的な_Static_assertを仕込み、qmk compileの
+// エラーメッセージから二分探索で実際の境界値を確認した（HANDOFF.md参照）。
+#define KB_SETTINGS_EEPROM_BASE  0x0840
 #define KB_SETTINGS_DEFAULT_TT   200  // デフォルト Tapping Term (ms)
+
+// dynamic_keymapとの衝突をコンパイル時に検知する。DYNAMIC_KEYMAP_EEPROM_ADDR自体は
+// nvm_dynamic_keymap.c内部限定のマクロで外部から参照できないため、同じ計算式
+// （EECONFIG_SIZE + レイヤー数×行×列×2）をここで再現している。EECONFIG_SIZEの実測値
+// (37)はVIA_ENABLE=off・EECONFIG_KB/USER_DATA_SIZE=0が前提。QMK更新でeeprom_core_tの
+// サイズが変わった場合はこの数値がずれる可能性があるので、疑わしい場合は上記の実測
+// 方法で確認し直すこと。
+#define KB_DYNAMIC_KEYMAP_EEPROM_ADDR_ASSUMED 37
+#define KB_DYNAMIC_KEYMAP_EEPROM_END_ASSUMED \
+    (KB_DYNAMIC_KEYMAP_EEPROM_ADDR_ASSUMED + (DYNAMIC_KEYMAP_LAYER_COUNT) * (MATRIX_ROWS) * (MATRIX_COLS) * 2)
+_Static_assert(KB_SETTINGS_EEPROM_BASE >= KB_DYNAMIC_KEYMAP_EEPROM_END_ASSUMED + 512,
+               "kb_settings EEPROMがdynamic_keymap領域と衝突またはマージンが不足しています。KB_SETTINGS_EEPROM_BASEを見直してください。");
 
 // ジェスチャーのデフォルト割り当て（macブラウザ標準・修飾子付きキーコード）
 // 0x0800=LGUI(Cmd), 0x0200=LSFT, KC_LBRC=0x2F, KC_RBRC=0x30
@@ -40,14 +62,14 @@ kb_settings_t kb_settings_get(void);
 // EEPROMに書き込みRAMキャッシュも更新する
 void kb_settings_set(const kb_settings_t *s);
 
-// ── トラックボール動作レイヤー（kb_settings構造体は満杯のため、EEPROM末尾の
-//    空き領域 0x03E0- に格納。マクロ領域は 0x0250-0x03DF なので衝突しない）──
-#define KB_SCROLL_LAYER_EEPROM   0x03E0  // スクロールレイヤー保存先
-#define KB_GESTURE_LAYER_EEPROM  0x03E1  // ジェスチャーレイヤー保存先
-#define KB_GESTURE_TH_H_EEPROM  0x03E2  // ジェスチャー横方向しきい値保存先
-#define KB_GESTURE_TH_V_EEPROM  0x03E3  // ジェスチャー縦方向しきい値保存先
-#define KB_PRECISION_DIV_EEPROM   0x03E4  // 超低速モードの分周値保存先
-#define KB_PRECISION_LAYER_EEPROM 0x03E5  // 超低速モードの連動レイヤー保存先
+// ── トラックボール動作レイヤー（kb_settings構造体は満杯のため、マクロ領域の
+//    直後 0x09E0- に格納）──
+#define KB_SCROLL_LAYER_EEPROM   0x09E0  // スクロールレイヤー保存先
+#define KB_GESTURE_LAYER_EEPROM  0x09E1  // ジェスチャーレイヤー保存先
+#define KB_GESTURE_TH_H_EEPROM  0x09E2  // ジェスチャー横方向しきい値保存先
+#define KB_GESTURE_TH_V_EEPROM  0x09E3  // ジェスチャー縦方向しきい値保存先
+#define KB_PRECISION_DIV_EEPROM   0x09E4  // 超低速モードの分周値保存先
+#define KB_PRECISION_LAYER_EEPROM 0x09E5  // 超低速モードの連動レイヤー保存先
 #define KB_LAYER_NONE            0xFE    // 「なし」を表す値（0xFF=未初期化と区別）
 
 // スクロールレイヤー（0-7=そのレイヤーでスクロール / KB_LAYER_NONE=無効。既定3）
@@ -87,8 +109,8 @@ void    kb_precision_layer_set(uint8_t v);
 // ── レイヤー連動LED（レイヤーごとに異なる光り方を設定できる機能）──────────
 // 有効フラグ1バイト + レイヤー1-7それぞれ6バイトのテーブル（レイヤー0は
 // 通常のLED設定＝GET/SET_LEDの値をそのまま使うので対象外）。
-#define KB_LAYER_LED_ENABLE_EEPROM 0x03E6  // 機能そのものの有効/無効
-#define KB_LAYER_LED_TABLE_EEPROM  0x03E7  // レイヤー別LED設定テーブル先頭（0x03E7-0x0410、42バイト）
+#define KB_LAYER_LED_ENABLE_EEPROM 0x09E6  // 機能そのものの有効/無効
+#define KB_LAYER_LED_TABLE_EEPROM  0x09E7  // レイヤー別LED設定テーブル先頭（0x09E7-0x0A10、42バイト）
 #define KB_LAYER_LED_MAX_LAYER     7       // 対象レイヤーの最大値（1-7）
 #define KB_LAYER_LED_ENTRY_SIZE    6        // 1レイヤーあたりのバイト数
 
@@ -124,6 +146,6 @@ typedef struct {
     uint8_t speed;
 } __attribute__((packed)) kb_led_config_t;
 
-#define KB_LED_CONFIG_EEPROM 0x0411  // 5バイト（0x0411-0x0415）
+#define KB_LED_CONFIG_EEPROM 0x0A11  // 5バイト（0x0A11-0x0A15）
 kb_led_config_t kb_led_config_get(void);
 void            kb_led_config_set(const kb_led_config_t *cfg);
