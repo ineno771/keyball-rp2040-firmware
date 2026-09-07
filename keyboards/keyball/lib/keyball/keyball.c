@@ -273,10 +273,17 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
     } else if (kb_scroll_inertia_enable_get() &&
                (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
         // 新規入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
+        //
+        // 注意（重要）: m->xに「代入」ではなく「加算」しているのは、スクロールの
+        // 分周値（既定でbase_div=16相当）に対してvxが小さいと、divmod16の商が
+        // 毎回0になり続けて実際のスクロール量が一切発生しないまま慣性が終わって
+        // しまう不具合があったため。m->xは前回divmod16で割り切れなかった端数を
+        // 保持しているので、そこへ加算していけば実際のボール移動と同じ仕組みで
+        // 端数が蓄積し、いずれ分周値を超えた時点で正しくスクロールが発生する。
         inertia->coasting = true;
         uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
-        m->x               = inertia->vx;
-        m->y               = inertia->vy;
+        m->x               = add16(m->x, inertia->vx);
+        m->y               = add16(m->y, inertia->vy);
         inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
         inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
         if (abs(inertia->vx) + abs(inertia->vy) < 1) {
