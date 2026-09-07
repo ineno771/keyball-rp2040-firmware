@@ -105,14 +105,14 @@ static bool SNAKE(effect_params_t* params) {
         head      = (head + 1) % count;
     }
 
-    const uint8_t TAIL_LEN = 6;
-    HSV           hsv      = rgb_matrix_config.hsv;
+    // 尻尾のフェードは付けず、配線順(インデックス)で1個のLEDだけが点灯して進む
+    // （複数箇所が同時に光ってバラバラに見えるという指摘を受けて変更）。
+    HSV hsv = rgb_matrix_config.hsv;
     for (uint8_t i = led_min; i < led_max; i++) {
-        uint8_t pos  = i - led_min;
-        uint8_t dist = (head + count - pos) % count;  // headから見た巡回距離
-        HSV     out  = hsv;
-        out.v        = (dist < TAIL_LEN) ? (uint8_t)((uint16_t)hsv.v * (TAIL_LEN - dist) / TAIL_LEN) : 0;
-        RGB rgb      = rgb_matrix_hsv_to_rgb(out);
+        uint8_t pos = i - led_min;
+        HSV     out = hsv;
+        if (pos != head) out.v = 0;
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
     return rgb_matrix_check_finished_leds(led_max);
