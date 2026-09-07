@@ -208,15 +208,23 @@ static bool TWINKLE(effect_params_t* params) {
     static bool     twinkle_active[RGB_MATRIX_LED_COUNT];
     static uint16_t spawn_last_tick = 0;
 
-    // 瞬きの発生頻度: speedが大きいほど短い間隔で新しい瞬きが生まれる
-    // 最速でもそこまで慌ただしくならないよう、全体的に遅めのレンジにしてある
-    uint16_t spawn_interval = 3000 - ((uint16_t)rgb_matrix_config.speed * 2200 / 255);  // 800〜3000ms
-    uint8_t  count          = led_max - led_min;
-    if (count > 0 && timer_elapsed(spawn_last_tick) >= spawn_interval) {
-        spawn_last_tick     = timer_read();
-        uint8_t idx         = led_min + random8_max(count);
-        twinkle_start[idx]  = timer_read();
-        twinkle_active[idx] = true;
+    // RGB_MATRIX_USE_LIMITSは1フレームの描画を複数回のiterに分けて呼び出す仕組みのため、
+    // 無し側では一時的にled_min > led_max（範囲が空・反転）になる区間がある。単純な
+    // for文（i=led_min; i<led_max; i++）なら自動的に何もせず安全だが、以下は配列の
+    // 添字をled_min基準で直接計算するため、その保護が無いとcount(uint8_t)が
+    // アンダーフローして巨大な値になり、配列範囲外に書き込んでしまっていた
+    // （実機でランダムなキーが反応しなくなる不具合として発現）。
+    if (led_max > led_min) {
+        // 瞬きの発生頻度: speedが大きいほど短い間隔で新しい瞬きが生まれる
+        // 最速でもそこまで慌ただしくならないよう、全体的に遅めのレンジにしてある
+        uint16_t spawn_interval = 3000 - ((uint16_t)rgb_matrix_config.speed * 2200 / 255);  // 800〜3000ms
+        uint8_t  count          = led_max - led_min;
+        if (timer_elapsed(spawn_last_tick) >= spawn_interval) {
+            spawn_last_tick     = timer_read();
+            uint8_t idx         = led_min + random8_max(count);
+            twinkle_start[idx]  = timer_read();
+            twinkle_active[idx] = true;
+        }
     }
 
     const uint16_t TWINKLE_MS = 1500;  // 瞬き1回分の長さ（明るくなって元に戻るまで）
