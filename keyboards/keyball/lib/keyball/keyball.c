@@ -236,6 +236,14 @@ typedef struct {
 // ピーク速度そのものに比例するため、ボールを速く回すほど強く滑るようになる。
 #define KEYBALL_SCROLL_INERTIA_BOOST 4
 
+// 慣性を発動させる最低速度（base_divの倍数）。ゆっくり意図的にスクロール
+// している時は発動させたくない、速く弾いた時だけ発動してほしい、という
+// 要望への対応。base_div（分周値=1目盛りあたりの生カウント数）の倍数で
+// 表しているのは、この値がユーザーのスクロール感度設定によって変わる
+// ため（感度を変えても「何目盛り分の速さが要るか」という相対的な基準は
+// 変わらないようにするため）。
+#define KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT 3
+
 static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
 
 static void keyball_scroll_inertia_reset(void) {
@@ -267,7 +275,13 @@ static keyball_scroll_inertia_t *keyball_scroll_inertia_of(const keyball_motion_
 static bool keyball_scroll_inertia_should_apply(const keyball_motion_t *m) {
     if (!kb_scroll_inertia_enable_get()) return false;  // 無効時は素通し（move側の通常動作に任せる）
     keyball_scroll_inertia_t *inertia = keyball_scroll_inertia_of(m);
-    return inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2;
+    if (inertia->coasting) return true;
+    // まだcoasting=trueになっていなくても、ピーク速度が「速く弾いた」と
+    // 言えるレベルに達していればスクロール側を呼び続ける必要がある
+    // （理由は下のkeyball_on_apply_motion_to_mouse_scroll側のコメント参照）。
+    int16_t base_div  = (1 << (keyball_get_scroll_div() - 1)) * KEYBALL_SCROLL_DIV_BASE;
+    int16_t min_flick = base_div * KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT;
+    return (abs(inertia->peak_vx) + abs(inertia->peak_vy)) >= min_flick;
 }
 
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
@@ -286,36 +300,36 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
 #else
     bool inhibited = false;
 #endif
-    // keyball_scroll_inertia_min_velocity()と同じ式（base_divそのもの）。
-    // 下のスクロール消費でも使うのでここで計算しておく。
+    // 下のスクロール消費や慣性のしきい値計算でも使うのでここで計算しておく。
     int16_t base_div = (1 << (keyball_get_scroll_div() - 1)) * KEYBALL_SCROLL_DIV_BASE;
+
+    // 慣性を発動させる最低速度。この値未満のピーク速度（＝ゆっくり意図的に
+    // 動かした場合）では滑走を開始させない。継続・停止のしきい値には使わない
+    // （継続中はここより小さい速度でも、蓄積により発生し続けるのが正しい
+    // 挙動なので、開始判定にだけ使う）。
+    int16_t min_flick = base_div * KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT;
 
     bool new_input = !inhibited && ((m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y));
     if (new_input) {
-        // 実入力あり: 平滑化はせず、直近の生の値をそのまま「今の速度」として
-        // 採用する（平滑化すると、指を離す直前の減速分だけを拾ってフリックの
-        // 本当の勢いを弱く見積もってしまうため）。
-        inertia->vx       = m->x;
-        inertia->vy       = m->y;
+        // 実入力あり: ピーク速度を更新する（一連の動きの中で一番速かった
+        // 瞬間を覚えておき、指を離す直前にたまたま減速していても取りこぼ
+        // さないようにする）。
         inertia->coasting = false;
-        // ピーク速度も更新する（一連の動きの中で一番速かった瞬間を覚えておき、
-        // 指を離す直前にたまたま減速していても取りこぼさないようにする）。
         if (abs(m->x) > abs(inertia->peak_vx)) inertia->peak_vx = m->x;
         if (abs(m->y) > abs(inertia->peak_vy)) inertia->peak_vy = m->y;
     } else if (kb_scroll_inertia_enable_get() &&
-               (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
-        // 新規入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
+               (inertia->coasting || (abs(inertia->peak_vx) + abs(inertia->peak_vy)) >= min_flick)) {
+        // 新規入力なし・慣性ON・ピーク速度が「速く弾いた」と言えるレベルに
+        // 達している（またはすでに滑走中）: 減衰させながら滑らせる。
         //
-        // 注意（重要・しきい値についての補足）: 開始/継続/停止のしきい値には
-        // base_div（分周値）ではなく小さい固定値(2)を使っている。一度は
-        // 「base_div未満の速度はdivmod16の商が毎回0でスクロールが発生しない」
-        // という理由でbase_divをしきい値にしてみたが、それは誤りだった。
-        // 下でm->xに「代入」ではなく「加算」しているため、たとえ1回あたりの
-        // 速度がbase_div未満でも、実際のボール移動と同じ仕組みで端数が
-        // 複数フレームにわたって蓄積し、いずれ分周値を超えた時点で正しく
-        // スクロールが発生する。base_divをしきい値にすると、まさにこの
-        // 「小さい速度が時間をかけて蓄積して発生する」ケースを開始前に
-        // 弾いてしまい、慣性そのものが働かなくなってしまっていた。
+        // 注意（重要）: 滑走を開始した後の継続・停止判定はpeak_vxではなく
+        // inertia->vx（滑走中に減衰していく値）を見る。継続判定にmin_flick
+        // のようなbase_div基準のしきい値を使うと、減衰の終盤（base_div未満）
+        // で強制停止してしまうが、下でm->xに「代入」ではなく「加算」して
+        // いるため、base_div未満の速度でも複数フレームかけて蓄積しいずれ
+        // 分周値を超えた時点で正しくスクロールが発生する。継続判定を厳しく
+        // すると、この「小さい速度が時間をかけて発生する」ケースを潰して
+        // しまう。
         if (!inertia->coasting) {
             // 滑走開始: ピーク速度にブースト倍率をかけたものを初速にする
             // （本人希望：ボールの回転の速さで慣性の効きを変える。速く弾く
