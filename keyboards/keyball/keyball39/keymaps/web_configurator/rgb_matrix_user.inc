@@ -219,7 +219,7 @@ static bool TWINKLE(effect_params_t* params) {
         twinkle_active[idx] = true;
     }
 
-    const uint16_t TWINKLE_MS = 500;  // 瞬き1回分の長さ（明るくなって元に戻るまで）
+    const uint16_t TWINKLE_MS = 1500;  // 瞬き1回分の長さ（明るくなって元に戻るまで）
     for (uint8_t i = led_min; i < led_max; i++) {
         HSV hsv = rgb_matrix_config.hsv;  // 基本は常時点灯（設定色そのまま）
         if (twinkle_active[i]) {
