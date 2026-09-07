@@ -465,8 +465,9 @@ static bool ALTERNATING(effect_params_t* params) {
 }
 
 // HEATMAP: 押したキーのLEDだけに熱量(0-255)を持たせ、押すたびに加算・時間経過で
-// 減衰させる。明るさ(v)だけを熱量で変化させ、色相・彩度はrgb_matrix_config.hsvを
-// そのまま使うため、組み込み版と違って色相調整が効く。
+// 減衰させる。明るさ(v)は熱量に関わらず設定値のまま保持し、代わりに色相を熱量に
+// 応じて寒色(青)→暖色(赤)へ変化させる（本人希望。何度も押すほど色が変わって
+// いく見た目にするため）。彩度はrgb_matrix_config.hsvの設定をそのまま使う。
 // アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
 // （RIPPLE・REACTIVE_KEYSと同じ扱い）。
 #define HEATMAP_INCREASE_STEP    32   // 1打鍵あたりの熱量増加
@@ -512,7 +513,14 @@ static bool HEATMAP(effect_params_t* params) {
     for (uint8_t i = led_min; i < led_max; i++) {
         HSV out = base;
         if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
-            out.v = scale8(heat[i], base.v);
+            if (heat[i] == 0) {
+                out.v = 0;  // 一度も押されていない（または冷めきった）キーは消灯
+            } else {
+                // 熱量0〜255を色相170(青=寒色)〜0(赤=暖色)にマッピングする。
+                // 明るさは熱量に関係なく設定値のまま（本人希望）。
+                out.h = (uint8_t)(170 - ((uint16_t)heat[i] * 170 / 255));
+                out.v = base.v;
+            }
             if (do_decay && heat[i] > 0) heat[i]--;
         }
         RGB rgb = rgb_matrix_hsv_to_rgb(out);

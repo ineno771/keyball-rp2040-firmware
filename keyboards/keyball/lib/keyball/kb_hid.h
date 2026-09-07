@@ -72,7 +72,8 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id);
 //   共有しているため、そちらでは引き続き非表示にしている。
 // - 14・15・16・17はRGB_MATRIX版限定の追加エフェクト：
 //   14=リアクティブ(REACTIVE_KEYS) 15=タイピングヒートマップ(HEATMAP、自作。
-//   組み込みTYPING_HEATMAPは隣接キーへの熱伝播や色相固定が要望に合わず不採用)
+//   組み込みTYPING_HEATMAPは隣接キーへの熱伝播があり不採用。明るさは設定値のまま
+//   保持し、押した回数(蓄熱量)に応じて色相が寒色→暖色に変化する仕様)
 //   16=トラックボールリアクティブ(TRACKBALL) 17=リップル(RIPPLE)
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
