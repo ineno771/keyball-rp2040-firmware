@@ -181,17 +181,26 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         }
 
 #ifdef RGB_MATRIX_ENABLE
-        // エフェクトID対応表（Web側の0-5をQMKモード番号に変換）
-        // 0:オフ 1:単色 2:呼吸 3:レインボー 4:キー反応 5:キー反応（予備）
-#define LED_EFFECT_COUNT 6
+        // エフェクトID対応表（Web側のID⇔QMKのRGB_MATRIX_*）。
+        // ファイル先頭のRGBLIGHT版LED_EFFECT_MAP(0-10)と同じID体系に揃えてあるため
+        // Web UI（keyball-configurator）のLED_EFFECTS一覧はそのまま流用できる。
+        // 14番のみRGB_MATRIX限定の追加エフェクト（キー反応）で、RGBLIGHT側には無い
+        // ためLED_EFFECT_MAP配列には含めずGET/SET_LEDで個別に特別扱いする。
+#define LED_EFFECT_COUNT 11
+#define LED_EFFECT_ID_REACTIVE_KEYS 14
 #ifdef RGB_MATRIX_CUSTOM_USER
         static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
-            RGB_MATRIX_NONE,
-            RGB_MATRIX_SOLID_COLOR,
-            RGB_MATRIX_BREATHING,
-            RGB_MATRIX_CYCLE_ALL,
-            RGB_MATRIX_CUSTOM_REACTIVE_KEYS,
-            RGB_MATRIX_CUSTOM_REACTIVE_KEYS,
+            RGB_MATRIX_NONE,             //  0: オフ
+            RGB_MATRIX_SOLID_COLOR,      //  1: 単色
+            RGB_MATRIX_BREATHING,        //  2: 呼吸
+            RGB_MATRIX_CYCLE_ALL,        //  3: レインボー
+            RGB_MATRIX_CYCLE_SPIRAL,     //  4: スワール
+            RGB_MATRIX_CUSTOM_SNAKE,     //  5: スネーク
+            RGB_MATRIX_CUSTOM_KNIGHT,    //  6: ナイトライダー
+            RGB_MATRIX_CUSTOM_CHRISTMAS, //  7: クリスマス
+            RGB_MATRIX_GRADIENT_UP_DOWN, //  8: グラデーション
+            RGB_MATRIX_RAINDROPS,        //  9: きらめき
+            RGB_MATRIX_CUSTOM_ALTERNATING, // 10: 交互点灯
         };
 #else
         static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
@@ -199,7 +208,12 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             RGB_MATRIX_SOLID_COLOR,
             RGB_MATRIX_BREATHING,
             RGB_MATRIX_CYCLE_ALL,
+            RGB_MATRIX_CYCLE_SPIRAL,
             RGB_MATRIX_BREATHING,
+            RGB_MATRIX_BREATHING,
+            RGB_MATRIX_BREATHING,
+            RGB_MATRIX_GRADIENT_UP_DOWN,
+            RGB_MATRIX_RAINDROPS,
             RGB_MATRIX_BREATHING,
         };
 #endif
@@ -209,8 +223,15 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         case KB_HID_CMD_GET_LED: {
             uint8_t mode = rgb_matrix_get_mode();
             uint8_t effect_id = 0;
-            for (uint8_t i = 0; i < LED_EFFECT_COUNT; i++) {
-                if (LED_EFFECT_MAP[i] == mode) { effect_id = i; break; }
+#ifdef RGB_MATRIX_CUSTOM_USER
+            if (mode == RGB_MATRIX_CUSTOM_REACTIVE_KEYS) {
+                effect_id = LED_EFFECT_ID_REACTIVE_KEYS;
+            } else
+#endif
+            {
+                for (uint8_t i = 0; i < LED_EFFECT_COUNT; i++) {
+                    if (LED_EFFECT_MAP[i] == mode) { effect_id = i; break; }
+                }
             }
             response[1] = effect_id;
             response[2] = rgb_matrix_get_hue();
@@ -225,8 +246,16 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // 要求: [cmd, effect_id, hue, sat, val, speed]
         // 応答: [cmd, status]
         case KB_HID_CMD_SET_LED: {
-            uint8_t effect_id = data[1] < LED_EFFECT_COUNT ? data[1] : 0;
-            rgb_matrix_mode(LED_EFFECT_MAP[effect_id]);
+            uint8_t effect_id = data[1];
+#ifdef RGB_MATRIX_CUSTOM_USER
+            if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) {
+                rgb_matrix_mode(RGB_MATRIX_CUSTOM_REACTIVE_KEYS);
+            } else
+#endif
+            {
+                if (effect_id >= LED_EFFECT_COUNT) effect_id = 0;
+                rgb_matrix_mode(LED_EFFECT_MAP[effect_id]);
+            }
             rgb_matrix_sethsv(data[2], data[3], data[4]);
             rgb_matrix_set_speed(data[5]);
             response[1] = KB_HID_STATUS_OK;

@@ -76,11 +76,15 @@
 #define RGB_MATRIX_CUSTOM_USER
 // キー入力に反応するエフェクト（REACTIVE_KEYS）に必要
 #define RGB_MATRIX_KEYPRESSES
-// kb_hid.cのLED_EFFECT_MAPが参照する組み込みエフェクト（暫定。本実装時に見直す）
+// kb_hid.cのLED_EFFECT_MAPが参照する組み込みエフェクト。
+// RGBLIGHT版の呼吸・レインボー・スワール・グラデーション・きらめきに対応する
+// 組み込みエフェクトを有効化（スネーク・ナイトライダー・クリスマス・交互点灯は
+// 組み込みに無いためrgb_matrix_user.incで自作している）。
 #define ENABLE_RGB_MATRIX_BREATHING
 #define ENABLE_RGB_MATRIX_CYCLE_ALL
-// Web UIのLEDドロップダウンはまだRGBLIGHT版のID体系のままで、このRGB_MATRIX
-// ビルドの簡易6択(0-5)とは対応していないため、動作確認は起動直後の状態で行う
+#define ENABLE_RGB_MATRIX_CYCLE_SPIRAL
+#define ENABLE_RGB_MATRIX_GRADIENT_UP_DOWN
+#define ENABLE_RGB_MATRIX_RAINDROPS
 #define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_REACTIVE_KEYS
 // 最大輝度（消費電力抑制、RGBLIGHT側と揃える）
 #define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
