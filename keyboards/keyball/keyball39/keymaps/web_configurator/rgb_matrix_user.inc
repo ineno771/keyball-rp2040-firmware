@@ -158,7 +158,7 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 
     for (uint8_t i = led_min; i < led_max; i++) {
         uint8_t slot = (uint8_t)(((i - led_min) + *phase) % count);
-        HSV     out  = {hues[slot], 255, rgb_matrix_config.hsv.v};
+        HSV     out  = {hues[slot], rgb_matrix_config.hsv.s, rgb_matrix_config.hsv.v};
         RGB     rgb  = rgb_matrix_hsv_to_rgb(out);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
