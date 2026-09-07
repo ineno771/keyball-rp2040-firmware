@@ -24,6 +24,11 @@ RGB_MATRIX_EFFECT(ALTERNATING)
 RGB_MATRIX_EFFECT(HALLOWEEN)
 RGB_MATRIX_EFFECT(EASTER)
 
+// TWINKLE: 基本は設定色で常時点灯し、ランダムなLEDが時々明るく煌めいてから元に戻る
+// （星の瞬きのような演出）。組み込みのRAINDROPS/STARLIGHTは常に色相・明るさが
+// 揺れ動いてしまい「基本は常時点灯」という要望に合わなかったため自作した。
+RGB_MATRIX_EFFECT(TWINKLE)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 static bool LED_TEST(effect_params_t* params) {
@@ -191,6 +196,47 @@ static bool EASTER(effect_params_t* params) {
     static uint16_t      last_tick = 0;
     static uint8_t       phase     = 0;
     render_checkerboard(params, hues, 3, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+static bool TWINKLE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // LEDごとに「今瞬いている最中か」「いつ始まったか」を持つ（REACTIVE_KEYSと同じ
+    // 発想で、LEDの数だけ独立したスロットを持つため取りこぼしや誤検出の心配がない）。
+    static uint16_t twinkle_start[RGB_MATRIX_LED_COUNT];
+    static bool     twinkle_active[RGB_MATRIX_LED_COUNT];
+    static uint16_t spawn_last_tick = 0;
+
+    // 瞬きの発生頻度: speedが大きいほど短い間隔で新しい瞬きが生まれる
+    uint16_t spawn_interval = 500 - ((uint16_t)rgb_matrix_config.speed * 450 / 255);  // 50〜500ms
+    uint8_t  count          = led_max - led_min;
+    if (count > 0 && timer_elapsed(spawn_last_tick) >= spawn_interval) {
+        spawn_last_tick     = timer_read();
+        uint8_t idx         = led_min + random8_max(count);
+        twinkle_start[idx]  = timer_read();
+        twinkle_active[idx] = true;
+    }
+
+    const uint16_t TWINKLE_MS = 500;  // 瞬き1回分の長さ（明るくなって元に戻るまで）
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV hsv = rgb_matrix_config.hsv;  // 基本は常時点灯（設定色そのまま）
+        if (twinkle_active[i]) {
+            uint16_t elapsed = timer_elapsed(twinkle_start[i]);
+            if (elapsed >= TWINKLE_MS) {
+                twinkle_active[i] = false;
+            } else {
+                // 0→山→0で明るさを一瞬持ち上げつつ彩度を落とし、白っぽく煌めかせる
+                uint8_t  t     = (uint8_t)(((uint32_t)elapsed * 255) / TWINKLE_MS);
+                uint8_t  boost = t < 128 ? (uint8_t)(t * 2) : (uint8_t)((255 - t) * 2);
+                hsv.s          = (uint8_t)((uint16_t)hsv.s * (255 - boost) / 255);
+                uint16_t v     = (uint16_t)hsv.v + ((uint16_t)(255 - hsv.v) * boost / 255);
+                hsv.v          = v > 255 ? 255 : (uint8_t)v;
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(hsv);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
     return rgb_matrix_check_finished_leds(led_max);
 }
 
