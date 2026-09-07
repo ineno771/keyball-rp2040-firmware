@@ -71,7 +71,11 @@ uint8_t kb_hid_led_effect_count(void) {
 // 揃えてあるため、Web UI（keyball-configurator）のLED_EFFECTS一覧をそのまま流用できる。
 // GET/SET_LEDだけでなく、レイヤー連動LED（keyball.c）からも参照する唯一の変換元。
 #define RGB_MATRIX_LED_EFFECT_COUNT 11
-#define LED_EFFECT_ID_REACTIVE_KEYS 14  // RGB_MATRIX限定の追加エフェクト。この表には含めない
+// 以下はRGB_MATRIX限定の追加エフェクト。RGBLIGHT版と共有のこの表には含めない
+#define LED_EFFECT_ID_REACTIVE_KEYS   14
+#define LED_EFFECT_ID_TYPING_HEATMAP  15
+#define LED_EFFECT_ID_TRACKBALL       16
+#define LED_EFFECT_ID_RIPPLE          17
 #ifdef RGB_MATRIX_CUSTOM_USER
 static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
     RGB_MATRIX_NONE,               //  0: オフ
@@ -95,12 +99,17 @@ static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
 #endif
 
 uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
+#ifdef ENABLE_RGB_MATRIX_TYPING_HEATMAP
+    if (effect_id == LED_EFFECT_ID_TYPING_HEATMAP) return RGB_MATRIX_TYPING_HEATMAP;
+#endif
 #ifdef RGB_MATRIX_CUSTOM_USER
     // ハロウィン・イースターはクリスマスと同じ「市松模様に交互点灯」する自作エフェクトを
     // 使う（RGBLIGHT版の単色クロスフェードとは動きを変えている。本人希望）。
     if (effect_id == KB_LED_EFFECT_HALLOWEEN) return RGB_MATRIX_CUSTOM_HALLOWEEN;
     if (effect_id == KB_LED_EFFECT_EASTER) return RGB_MATRIX_CUSTOM_EASTER;
     if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) return RGB_MATRIX_CUSTOM_REACTIVE_KEYS;
+    if (effect_id == LED_EFFECT_ID_TRACKBALL) return RGB_MATRIX_CUSTOM_TRACKBALL;
+    if (effect_id == LED_EFFECT_ID_RIPPLE) return RGB_MATRIX_CUSTOM_RIPPLE;
 #endif
     if (effect_id >= RGB_MATRIX_LED_EFFECT_COUNT) effect_id = 0;
     return RGB_MATRIX_LED_EFFECT_MAP[effect_id];

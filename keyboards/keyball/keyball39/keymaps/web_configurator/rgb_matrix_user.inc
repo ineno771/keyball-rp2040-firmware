@@ -29,7 +29,25 @@ RGB_MATRIX_EFFECT(EASTER)
 // 揺れ動いてしまい「基本は常時点灯」という要望に合わなかったため自作した。
 RGB_MATRIX_EFFECT(TWINKLE)
 
+// TRACKBALL: トラックボールを転がした向き・速さに応じて全LEDが一瞬色相を変えつつ
+// 明るく光り、動きが止まると元の設定色にフェードして戻る。Keyballならではの演出。
+RGB_MATRIX_EFFECT(TRACKBALL)
+
+// RIPPLE: 押したキーの物理座標(g_led_config.point)を中心に波紋がリング状に広がる。
+// アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
+// （本人希望。REACTIVE_KEYSと同じ扱い）。
+RGB_MATRIX_EFFECT(RIPPLE)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
+
+// TRACKBALL専用: keyball.this_motion/that_motion（トラックボールの移動量）を
+// 読むために必要。書き込みは一切行わない（ポインタ移動処理には影響しない）。
+// keyball39.c等と同じく、keyboards/keyball/を基準にした相対パスで指定する
+// （rgb_matrix_user.incはquantum/rgb_matrix/rgb_matrix.cから#includeされるため）。
+// keyball.hはreport_mouse_t（tmk_core/protocol/report.h）に依存しているが、
+// rgb_matrix.cの時点ではまだincludeされていないため先に読み込んでおく。
+#include "report.h"
+#include "lib/keyball/keyball.h"
 
 static bool LED_TEST(effect_params_t* params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
@@ -254,6 +272,148 @@ static bool TWINKLE(effect_params_t* params) {
         RGB rgb = rgb_matrix_hsv_to_rgb(hsv);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// TRACKBALL: keyball.this_motion/that_motion（トラックボールの移動量、split越しに
+// 同期済み）を読み、動いていれば向きに応じた色相へ一瞬変えつつ明るさを上げ、止まると
+// 元の設定色にフェードして戻る。read-onlyで値を変更しないため、ポインタ移動処理
+// （keyball.c側でこれらの値を蓄積・消費している）には一切影響しない。
+static bool TRACKBALL(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // 自分のハーフにボールが無ければ相方ハーフの動きを見る（ボールがどちらの手でも
+    // 同じように反応させるため）。
+    int16_t dx = keyball.this_have_ball ? keyball.this_motion.x : keyball.that_motion.x;
+    int16_t dy = keyball.this_have_ball ? keyball.this_motion.y : keyball.that_motion.y;
+    uint8_t adx = (uint8_t)(dx < 0 ? -dx : dx);
+    uint8_t ady = (uint8_t)(dy < 0 ? -dy : dy);
+
+    static uint16_t last_move_tick = 0;
+    static uint8_t  hold_hue       = 0;
+    static uint8_t  hold_speed     = 0;
+
+    if (adx > 0 || ady > 0) {
+        last_move_tick = timer_read();
+
+        // 向きを8方向に量子化して色相を割り当てる（atan2を使わない簡易版）。
+        // 右=赤(0) 左=シアン(128) 下=青(192) 上=黄緑(64)、斜めはその中間。
+        uint8_t hue;
+        if (adx > (uint8_t)(ady * 2)) {
+            hue = dx > 0 ? 0 : 128;
+        } else if (ady > (uint8_t)(adx * 2)) {
+            hue = dy > 0 ? 192 : 64;
+        } else if (dx > 0) {
+            hue = dy > 0 ? 224 : 32;
+        } else {
+            hue = dy > 0 ? 160 : 96;
+        }
+        hold_hue = hue;
+
+        uint16_t mag = (uint16_t)adx + (uint16_t)ady;
+        hold_speed   = mag > 255 ? 255 : (uint8_t)mag;
+    }
+
+    const uint16_t DECAY_MS = 600;  // 動きが止まってから元の色に戻るまでの時間
+    uint16_t       elapsed  = timer_elapsed(last_move_tick);
+    uint8_t        glow     = (elapsed >= DECAY_MS) ? 0 : (uint8_t)((uint32_t)hold_speed * (DECAY_MS - elapsed) / DECAY_MS);
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (glow > 0) {
+            out.h          = hold_hue;
+            uint16_t val_v = (uint16_t)base.v + glow;
+            out.v          = val_v > 255 ? 255 : (uint8_t)val_v;
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// RIPPLE: 押したキーの物理座標(g_led_config.point)を中心に、リング状の波紋が
+// 広がっていく。複数の波紋を同時に扱えるよう、g_last_hit_trackerとは別に専用の
+// スロット配列を持つ（固定8スロットのリングバッファだった旧SOLID_RIPPLEで
+// 「取りこぼす・波紋が途中で終わる」不具合があったため、空きスロット優先・
+// 無ければ最古を上書きする方式にしている）。
+#define RIPPLE_SLOT_COUNT 6
+static bool RIPPLE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    static uint16_t ripple_start[RIPPLE_SLOT_COUNT];
+    static uint8_t  ripple_x[RIPPLE_SLOT_COUNT];
+    static uint8_t  ripple_y[RIPPLE_SLOT_COUNT];
+    static bool     ripple_active[RIPPLE_SLOT_COUNT];
+
+    const uint16_t RIPPLE_MS    = 700;  // 波紋が広がりきるまでの時間
+    const uint8_t  RIPPLE_MAX_R = 100;  // 広がる最大半径（座標系はx:0-224,y:0-64程度）
+    const uint8_t  RIPPLE_WIDTH = 30;   // リングの太さ
+
+    // 新規ヒットを取り込む。g_last_hit_trackerはREACTIVE_KEYSと同じく「十分新しい
+    // ものだけ」判定で、長時間使用時にtickが古い情報を誤って取り込むのを防ぐ。
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;
+        uint8_t idx = g_last_hit_tracker.index[j];
+        if (idx >= RGB_MATRIX_LED_COUNT) continue;
+        if (g_led_config.flags[idx] & LED_FLAG_UNDERGLOW) continue;  // アンダーグローは起点にしない
+
+        uint8_t slot = RIPPLE_SLOT_COUNT;
+        for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+            if (!ripple_active[s]) { slot = s; break; }
+        }
+        if (slot == RIPPLE_SLOT_COUNT) {
+            // 空きが無ければ最も経過時間が長いスロットを上書きする
+            uint16_t oldest = 0;
+            for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+                uint16_t e = timer_elapsed(ripple_start[s]);
+                if (e >= oldest) { oldest = e; slot = s; }
+            }
+        }
+        ripple_start[slot]  = timer_read();
+        ripple_x[slot]      = g_led_config.point[idx].x;
+        ripple_y[slot]      = g_led_config.point[idx].y;
+        ripple_active[slot] = true;
+    }
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時点灯（設定色そのまま）
+        } else {
+            out.v = 0;
+            for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+                if (!ripple_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(ripple_start[s]);
+                if (elapsed >= RIPPLE_MS) continue;
+
+                uint16_t radius = (uint16_t)((uint32_t)elapsed * RIPPLE_MAX_R / RIPPLE_MS);
+                int16_t  dx     = (int16_t)g_led_config.point[i].x - (int16_t)ripple_x[s];
+                int16_t  dy     = (int16_t)g_led_config.point[i].y - (int16_t)ripple_y[s];
+                uint8_t  dist   = sqrt16((uint32_t)dx * dx + (uint32_t)dy * dy);
+                uint16_t ring_d = (dist > radius) ? (dist - radius) : (radius - dist);
+
+                if (ring_d < RIPPLE_WIDTH) {
+                    uint8_t fade        = (uint8_t)(255 - ((uint32_t)elapsed * 255 / RIPPLE_MS));
+                    uint8_t ring_bright = (uint8_t)(255 - ((uint32_t)ring_d * 255 / RIPPLE_WIDTH));
+                    uint8_t v           = (uint8_t)(((uint16_t)fade * ring_bright) / 255);
+                    if (v > out.v) out.v = v;  // 波紋同士が重なる場合は明るい方を採用
+                }
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+
+    for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+        if (ripple_active[s] && timer_elapsed(ripple_start[s]) >= RIPPLE_MS) {
+            ripple_active[s] = false;
+        }
+    }
+
     return rgb_matrix_check_finished_leds(led_max);
 }
 

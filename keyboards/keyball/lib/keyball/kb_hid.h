@@ -70,9 +70,11 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id);
 //   定まらず一旦見送った欠番。RGB_MATRIX版では片側ハーフ内で完結する実装に直った
 //   ため対応表(kb_hid.c)には存在するが、Web UIのLED_EFFECTSは本家RGBLIGHT版とも
 //   共有しているため、そちらでは引き続き非表示にしている。
-// - 14はRGB_MATRIX版限定の追加エフェクト（キー反応・REACTIVE_KEYS）。
+// - 14・15・16・17はRGB_MATRIX版限定の追加エフェクト：
+//   14=リアクティブ(REACTIVE_KEYS) 15=タイピングヒートマップ(TYPING_HEATMAP、組み込み)
+//   16=トラックボールリアクティブ(TRACKBALL) 17=リップル(RIPPLE)
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
-#define KB_LED_EFFECT_TOTAL_COUNT    15  // 有効なeffect_idの総数（0-14。6・10・12は欠番）
+#define KB_LED_EFFECT_TOTAL_COUNT    18  // 有効なeffect_idの総数（0-17。6・10・12は欠番）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif
