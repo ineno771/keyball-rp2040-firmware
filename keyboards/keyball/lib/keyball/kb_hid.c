@@ -475,20 +475,22 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         }
 
         // 0x1E: 慣性スクロール設定を返す
-        // 応答: [cmd, enable, strength, status]
+        // 応答: [cmd, enable, strength, flick_mult, status]
         case KB_HID_CMD_GET_SCROLL_INERTIA: {
             response[1] = kb_scroll_inertia_enable_get() ? 1 : 0;
             response[2] = kb_scroll_inertia_strength_get();
-            response[3] = KB_HID_STATUS_OK;
+            response[3] = kb_scroll_inertia_flick_mult_get();  // 発動しきい値の倍率×10（例:30=3.0倍）
+            response[4] = KB_HID_STATUS_OK;
             break;
         }
 
         // 0x1F: 慣性スクロール設定を変更してEEPROMに保存
-        // 要求: [cmd, enable, strength]
+        // 要求: [cmd, enable, strength, flick_mult]
         // 応答: [cmd, status]
         case KB_HID_CMD_SET_SCROLL_INERTIA: {
             kb_scroll_inertia_enable_set(data[1] != 0);
             kb_scroll_inertia_strength_set(data[2]);
+            kb_scroll_inertia_flick_mult_set(data[3]);
             response[1] = KB_HID_STATUS_OK;
             break;
         }

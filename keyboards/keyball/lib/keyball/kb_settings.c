@@ -278,3 +278,26 @@ void kb_scroll_inertia_strength_set(uint8_t v) {
     g_scroll_inertia_strength_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_STRENGTH_EEPROM, (uint8_t)g_scroll_inertia_strength);
 }
+
+// ── 慣性の発動しきい値の倍率×10（範囲外・未初期化(0xFF)ならデフォルトへ）───
+static uint16_t g_scroll_inertia_flick_mult        = 0xFFFF;
+static bool     g_scroll_inertia_flick_mult_loaded = false;
+
+uint8_t kb_scroll_inertia_flick_mult_get(void) {
+    if (!g_scroll_inertia_flick_mult_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_FLICK_MULT_EEPROM);
+        g_scroll_inertia_flick_mult = (v < KB_SCROLL_INERTIA_FLICK_MULT_MIN || v > KB_SCROLL_INERTIA_FLICK_MULT_MAX)
+                                          ? KB_SCROLL_INERTIA_FLICK_MULT_DEFAULT
+                                          : v;
+        g_scroll_inertia_flick_mult_loaded = true;
+    }
+    return (uint8_t)g_scroll_inertia_flick_mult;
+}
+
+void kb_scroll_inertia_flick_mult_set(uint8_t v) {
+    if (v < KB_SCROLL_INERTIA_FLICK_MULT_MIN) v = KB_SCROLL_INERTIA_FLICK_MULT_MIN;
+    if (v > KB_SCROLL_INERTIA_FLICK_MULT_MAX) v = KB_SCROLL_INERTIA_FLICK_MULT_MAX;
+    g_scroll_inertia_flick_mult        = v;
+    g_scroll_inertia_flick_mult_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_FLICK_MULT_EEPROM, (uint8_t)g_scroll_inertia_flick_mult);
+}

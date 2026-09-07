@@ -241,8 +241,8 @@ typedef struct {
 // 要望への対応。base_div（分周値=1目盛りあたりの生カウント数）の倍数で
 // 表しているのは、この値がユーザーのスクロール感度設定によって変わる
 // ため（感度を変えても「何目盛り分の速さが要るか」という相対的な基準は
-// 変わらないようにするため）。
-#define KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT 3
+// 変わらないようにするため）。倍率自体はkb_scroll_inertia_flick_mult_get()
+// でWeb UIから調整できる（×10した整数で保持。例:30なら3.0倍）。
 
 static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
 
@@ -280,7 +280,7 @@ static bool keyball_scroll_inertia_should_apply(const keyball_motion_t *m) {
     // 言えるレベルに達していればスクロール側を呼び続ける必要がある
     // （理由は下のkeyball_on_apply_motion_to_mouse_scroll側のコメント参照）。
     int16_t base_div  = (1 << (keyball_get_scroll_div() - 1)) * KEYBALL_SCROLL_DIV_BASE;
-    int16_t min_flick = base_div * KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT;
+    int16_t min_flick = (int16_t)((int32_t)base_div * kb_scroll_inertia_flick_mult_get() / 10);
     return (abs(inertia->peak_vx) + abs(inertia->peak_vy)) >= min_flick;
 }
 
@@ -307,7 +307,7 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
     // 動かした場合）では滑走を開始させない。継続・停止のしきい値には使わない
     // （継続中はここより小さい速度でも、蓄積により発生し続けるのが正しい
     // 挙動なので、開始判定にだけ使う）。
-    int16_t min_flick = base_div * KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT;
+    int16_t min_flick = (int16_t)((int32_t)base_div * kb_scroll_inertia_flick_mult_get() / 10);
 
     bool new_input = !inhibited && ((m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y));
     if (new_input) {

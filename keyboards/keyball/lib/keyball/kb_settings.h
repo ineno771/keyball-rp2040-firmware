@@ -160,6 +160,15 @@ void            kb_led_config_set(const kb_led_config_t *cfg);
 #define KB_SCROLL_INERTIA_STRENGTH_MAX     254
 #define KB_SCROLL_INERTIA_STRENGTH_DEFAULT 128
 
+// 発動しきい値の倍率。実際の倍率は「値÷10」（例: 25なら2.5倍）。0.1刻みまで
+// 表現できるよう10倍した整数で保持する。下限を0にしていないのは、0倍だと
+// しきい値が常に0になり「ゆっくり動かしても発動する」という本来の目的に
+// 反してしまうため。
+#define KB_SCROLL_INERTIA_FLICK_MULT_EEPROM   0x0A18  // 発動しきい値の倍率×10（1バイト）
+#define KB_SCROLL_INERTIA_FLICK_MULT_MIN      5    // 0.5倍
+#define KB_SCROLL_INERTIA_FLICK_MULT_MAX      100  // 10.0倍
+#define KB_SCROLL_INERTIA_FLICK_MULT_DEFAULT  30   // 3.0倍
+
 // 慣性スクロール機能そのものの有効/無効（既定: 無効）
 bool kb_scroll_inertia_enable_get(void);
 void kb_scroll_inertia_enable_set(bool v);
@@ -167,3 +176,10 @@ void kb_scroll_inertia_enable_set(bool v);
 // 慣性の強さ（0-254、大きいほど長く・遠くまで滑る。既定128）
 uint8_t kb_scroll_inertia_strength_get(void);
 void    kb_scroll_inertia_strength_set(uint8_t v);
+
+// 慣性を発動させる最低速度の倍率×10（5-100 = 0.5〜10.0倍、既定30 = 3.0倍）。
+// ゆっくり動かした時は発動させず、速く弾いた時だけ発動させるためのしきい値。
+// 大きいほど「よほど速く弾かないと発動しない」、小さいほど「そこそこの
+// 速さでも発動する」ようになる。
+uint8_t kb_scroll_inertia_flick_mult_get(void);
+void    kb_scroll_inertia_flick_mult_set(uint8_t v);
