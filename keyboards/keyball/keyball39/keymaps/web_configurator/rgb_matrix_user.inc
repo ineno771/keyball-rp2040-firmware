@@ -210,7 +210,7 @@ static bool TWINKLE(effect_params_t* params) {
 
     // 瞬きの発生頻度: speedが大きいほど短い間隔で新しい瞬きが生まれる
     // 最速でもそこまで慌ただしくならないよう、全体的に遅めのレンジにしてある
-    uint16_t spawn_interval = 1500 - ((uint16_t)rgb_matrix_config.speed * 1200 / 255);  // 300〜1500ms
+    uint16_t spawn_interval = 3000 - ((uint16_t)rgb_matrix_config.speed * 2200 / 255);  // 800〜3000ms
     uint8_t  count          = led_max - led_min;
     if (count > 0 && timer_elapsed(spawn_last_tick) >= spawn_interval) {
         spawn_last_tick     = timer_read();
