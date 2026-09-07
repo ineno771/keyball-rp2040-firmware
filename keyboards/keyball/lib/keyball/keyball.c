@@ -217,7 +217,8 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
 // 代わりに「前回この関数を抜けた時点でm->x/m->yに残っていたはずの値」を
 // 覚えておき、そこから変化していない場合だけ「新規入力なし」と判定する。
 typedef struct {
-    int16_t  vx, vy;                              // 直近の速度推定値（生のセンサーカウント/呼び出し相当）
+    int16_t  vx, vy;                              // 滑走中の速度（減衰していく値）
+    int16_t  peak_vx, peak_vy;                    // 直近の一連の動きで観測した最大速度（フリックの勢い）
     int16_t  prev_remainder_x, prev_remainder_y;  // 前回消費後にm->x/m->yへ残っていたはずの値
     bool     coasting;                            // 現在、慣性で滑っている最中か
     uint32_t coast_started_at;                    // 滑走を開始した時刻（万一の張り付き防止の安全弁用）
@@ -227,10 +228,25 @@ typedef struct {
 // この時間を過ぎたら問答無用で強制終了する安全弁（スクロールが延々と反応しなく
 // なる不具合の再発防止）。
 #define KEYBALL_SCROLL_INERTIA_MAX_COAST_MS 3000
+
+// 滑走開始時、観測したピーク速度にかけるブースト倍率。生の値をそのまま
+// 使うと分周値(base_div)に対して小さすぎて、実際に目に見えるスクロールに
+// ならないことがあったため（h/vが±1にしかならず、体感できるほど動かない）。
+// 倍率が大きいほど「同じ速さで弾いても遠くまで/大きく」滑るようになり、かつ
+// ピーク速度そのものに比例するため、ボールを速く回すほど強く滑るようになる。
+#define KEYBALL_SCROLL_INERTIA_BOOST 4
+
 static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
 
 static void keyball_scroll_inertia_reset(void) {
     memset(g_scroll_inertia, 0, sizeof(g_scroll_inertia));
+}
+
+// int32_tの値をint16_tの範囲に収める（ブースト倍率をかけた後のオーバーフロー防止）
+static int16_t keyball_clip_int16(int32_t v) {
+    if (v > INT16_MAX) return INT16_MAX;
+    if (v < INT16_MIN) return INT16_MIN;
+    return (int16_t)v;
 }
 
 static keyball_scroll_inertia_t *keyball_scroll_inertia_of(const keyball_motion_t *m) {
@@ -276,10 +292,16 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
 
     bool new_input = !inhibited && ((m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y));
     if (new_input) {
-        // 実入力あり: 直近の速度を更新（新しい値を重めに反映する単純な平滑化）
-        inertia->vx       = (int16_t)(((int32_t)inertia->vx + (int32_t)m->x * 3) / 4);
-        inertia->vy       = (int16_t)(((int32_t)inertia->vy + (int32_t)m->y * 3) / 4);
+        // 実入力あり: 平滑化はせず、直近の生の値をそのまま「今の速度」として
+        // 採用する（平滑化すると、指を離す直前の減速分だけを拾ってフリックの
+        // 本当の勢いを弱く見積もってしまうため）。
+        inertia->vx       = m->x;
+        inertia->vy       = m->y;
         inertia->coasting = false;
+        // ピーク速度も更新する（一連の動きの中で一番速かった瞬間を覚えておき、
+        // 指を離す直前にたまたま減速していても取りこぼさないようにする）。
+        if (abs(m->x) > abs(inertia->peak_vx)) inertia->peak_vx = m->x;
+        if (abs(m->y) > abs(inertia->peak_vy)) inertia->peak_vy = m->y;
     } else if (kb_scroll_inertia_enable_get() &&
                (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
         // 新規入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
@@ -295,7 +317,13 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
         // 「小さい速度が時間をかけて蓄積して発生する」ケースを開始前に
         // 弾いてしまい、慣性そのものが働かなくなってしまっていた。
         if (!inertia->coasting) {
-            // 滑走の開始時刻を記録する（万一の張り付き防止の安全弁用）
+            // 滑走開始: ピーク速度にブースト倍率をかけたものを初速にする
+            // （本人希望：ボールの回転の速さで慣性の効きを変える。速く弾く
+            // ほどピーク速度が大きく、より強く・長く滑るようになる）。
+            inertia->vx = keyball_clip_int16((int32_t)inertia->peak_vx * KEYBALL_SCROLL_INERTIA_BOOST);
+            inertia->vy = keyball_clip_int16((int32_t)inertia->peak_vy * KEYBALL_SCROLL_INERTIA_BOOST);
+            inertia->peak_vx        = 0;
+            inertia->peak_vy        = 0;
             inertia->coast_started_at = timer_read32();
         }
         inertia->coasting = true;
