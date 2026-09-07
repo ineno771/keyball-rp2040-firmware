@@ -212,7 +212,9 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 
 void matrix_scan_user(void) {
-#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
+#ifdef RGBLIGHT_ENABLE
+    // RGB_MATRIX版はハロウィン・イースターも通常の自作エフェクトとして実装しており
+    // 外部から毎フレーム駆動する必要が無いため、この呼び出しはRGBLIGHT版のみでよい。
     keyball_seasonal_led_task();
 #endif
 

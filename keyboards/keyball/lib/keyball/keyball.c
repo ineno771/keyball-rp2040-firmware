@@ -651,8 +651,11 @@ void keyball_apply_layer_led(uint8_t hl) {
     }
 }
 
-// 季節限定LEDエフェクト: 単色モードの色を毎フレーム少しずつ変えることでクロスフェード
-// させる（RGBLIGHT本体のクリスマスエフェクトと似た「ゆっくり色が移り変わる」動き）。
+#ifdef RGBLIGHT_ENABLE
+// 季節限定LEDエフェクト（RGBLIGHT版のみ）: 単色モードの色を毎フレーム少しずつ変えることで
+// クロスフェードさせる（RGBLIGHT本体のクリスマスエフェクトと似た「ゆっくり色が移り変わる」
+// 動き）。RGB_MATRIX版はこれとは別に、クリスマスと同じ「市松模様に交互点灯」する動きの
+// 専用エフェクト(HALLOWEEN・EASTER)をrgb_matrix_user.incに自作しており、本関数は使わない。
 //
 // 以前は全LEDを直接rgblight_setrgb_at()+rgblight_set()で書き換えていたが、この方法は
 // RGBLIGHT本体の状態（rgblight_config）を経由しないため、スプリット同期の仕組み
@@ -728,17 +731,13 @@ void keyball_seasonal_led_task(void) {
 
     uint8_t blended_hue = (uint8_t)(hue_from + (diff * (int32_t)t) / 255);
 
-#ifdef RGB_MATRIX_ENABLE
-    rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_COLOR);
-    rgb_matrix_sethsv_noeeprom(blended_hue, sat, val);
-#else
     rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
     rgblight_sethsv_noeeprom(blended_hue, sat, val);
-#endif
 
     g_seasonal_pos = (uint8_t)((g_seasonal_pos + 1) % total);
 }
-#endif // defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
+#endif // RGBLIGHT_ENABLE（季節限定LEDエフェクト、RGBLIGHT版のみ）
+#endif // defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)（レイヤー連動LED、両対応）
 
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void) {
 #if KEYBALL_SCROLLSNAP_ENABLE == 2

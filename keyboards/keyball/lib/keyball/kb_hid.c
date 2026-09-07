@@ -95,12 +95,11 @@ static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
 #endif
 
 uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
-    if (kb_hid_led_effect_is_seasonal(effect_id)) {
-        // ハロウィン・イースターはモードをSOLID_COLORに固定し、実際の色相変化は
-        // keyball_seasonal_led_task()が毎フレームsethsv_noeeprom()で押し出す。
-        return RGB_MATRIX_SOLID_COLOR;
-    }
 #ifdef RGB_MATRIX_CUSTOM_USER
+    // ハロウィン・イースターはクリスマスと同じ「市松模様に交互点灯」する自作エフェクトを
+    // 使う（RGBLIGHT版の単色クロスフェードとは動きを変えている。本人希望）。
+    if (effect_id == KB_LED_EFFECT_HALLOWEEN) return RGB_MATRIX_CUSTOM_HALLOWEEN;
+    if (effect_id == KB_LED_EFFECT_EASTER) return RGB_MATRIX_CUSTOM_EASTER;
     if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) return RGB_MATRIX_CUSTOM_REACTIVE_KEYS;
 #endif
     if (effect_id >= RGB_MATRIX_LED_EFFECT_COUNT) effect_id = 0;

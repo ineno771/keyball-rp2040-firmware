@@ -19,6 +19,11 @@ RGB_MATRIX_EFFECT(KNIGHT)
 RGB_MATRIX_EFFECT(CHRISTMAS)
 RGB_MATRIX_EFFECT(ALTERNATING)
 
+// ハロウィン・イースター（季節限定）。RGBLIGHT版は単色クロスフェードだったが、
+// 本人希望によりクリスマスと同じ「市松模様に交互点灯」する動きに揃えている。
+RGB_MATRIX_EFFECT(HALLOWEEN)
+RGB_MATRIX_EFFECT(EASTER)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 static bool LED_TEST(effect_params_t* params) {
@@ -140,26 +145,52 @@ static bool KNIGHT(effect_params_t* params) {
 }
 
 // CHRISTMAS: 赤と緑を交互に配置し、一定間隔で入れ替える（RGBLIGHT_MODE_CHRISTMASの再現）。
-static bool CHRISTMAS(effect_params_t* params) {
+// 複数色を市松模様に配置し、一定間隔でずらしていく（CHRISTMAS・HALLOWEEN・EASTERの
+// 共通実装）。色数2なら「0→1→0→1…」と交互点灯、3なら3色が順にずれていく。
+static void render_checkerboard(effect_params_t* params, const uint8_t* hues, uint8_t count, uint16_t* last_tick, uint8_t* phase) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
 
     uint16_t interval = 1500 - ((uint16_t)rgb_matrix_config.speed * 1400 / 255);  // 100〜1500ms
-    static uint16_t last_tick = 0;
-    static bool     phase     = false;
-    if (timer_elapsed(last_tick) >= interval) {
-        last_tick = timer_read();
-        phase     = !phase;
+    if (timer_elapsed(*last_tick) >= interval) {
+        *last_tick = timer_read();
+        *phase     = (uint8_t)((*phase + 1) % count);
     }
 
-    const uint8_t HUE_RED   = 0;
-    const uint8_t HUE_GREEN = 85;
     for (uint8_t i = led_min; i < led_max; i++) {
-        bool    even = ((i - led_min) % 2) == 0;
-        uint8_t hue  = (even == phase) ? HUE_RED : HUE_GREEN;
-        HSV     out  = {hue, 255, rgb_matrix_config.hsv.v};
+        uint8_t slot = (uint8_t)(((i - led_min) + *phase) % count);
+        HSV     out  = {hues[slot], 255, rgb_matrix_config.hsv.v};
         RGB     rgb  = rgb_matrix_hsv_to_rgb(out);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
+}
+
+static bool CHRISTMAS(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {0, 85};  // 赤・緑
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 2, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// HALLOWEEN: オレンジ×紫の市松模様（色相はkeyball.cのRGBLIGHT版seasonal_palette_forと
+// 揃えてある）。
+static bool HALLOWEEN(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {21, 191};  // オレンジ・紫
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 2, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// EASTER: パステルピンク・グリーン・イエローの3色が順にずれていく市松模様。
+static bool EASTER(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {228, 90, 42};  // パステルピンク・グリーン・イエロー
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 3, &last_tick, &phase);
     return rgb_matrix_check_finished_leds(led_max);
 }
 
