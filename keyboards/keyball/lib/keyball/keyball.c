@@ -242,7 +242,7 @@ typedef struct {
 // 表しているのは、この値がユーザーのスクロール感度設定によって変わる
 // ため（感度を変えても「何目盛り分の速さが要るか」という相対的な基準は
 // 変わらないようにするため）。
-#define KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT 2
+#define KEYBALL_SCROLL_INERTIA_MIN_FLICK_DIV_MULT 3
 
 static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
 
