@@ -207,9 +207,19 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
 // しばらく滑るように」スクロールが続く演出を実現する。this_motion用/
 // that_motion用で別々に状態を持つ必要があるため、m（呼び出し元が渡してくる
 // ポインタ）がkeyball.this_motionかkeyball.that_motionかで添字を分ける。
+//
+// 注意（重要）: 下のスクロール消費処理（非hires時）はdivmod16で「割り切れ
+// なかった端数」をm->x/m->yに残し続ける設計になっている。端数は一度base_div
+// を下回るとそれ以上減らず、新しいボール入力が無い限りずっと同じ値のまま
+// 居座り続ける。そのため「m->x/m->yが0でない」ことを「今回新しくボールが
+// 動いた」判定に使うと、端数が残っている間ずっと"入力あり"と誤判定して
+// しまい、慣性が全く働かなくなる（実際に最初の実装がこの不具合だった）。
+// 代わりに「前回この関数を抜けた時点でm->x/m->yに残っていたはずの値」を
+// 覚えておき、そこから変化していない場合だけ「新規入力なし」と判定する。
 typedef struct {
-    int16_t vx, vy;    // 直近の速度推定値（生のセンサーカウント/呼び出し相当）
-    bool    coasting;  // 現在、慣性で滑っている最中か
+    int16_t vx, vy;                              // 直近の速度推定値（生のセンサーカウント/呼び出し相当）
+    int16_t prev_remainder_x, prev_remainder_y;  // 前回消費後にm->x/m->yへ残っていたはずの値
+    bool    coasting;                            // 現在、慣性で滑っている最中か
 } keyball_scroll_inertia_t;
 static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
 
@@ -220,15 +230,16 @@ static void keyball_scroll_inertia_reset(void) {
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
     // 実際のボール入力（m->x/m->y、まだ消費されていない生の蓄積値）を消費する前に
     // 慣性スクロールの速度更新・合成モーションの注入を行う。
-    keyball_scroll_inertia_t *inertia = &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
-    if (m->x != 0 || m->y != 0) {
+    keyball_scroll_inertia_t *inertia   = &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
+    bool                      new_input = (m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y);
+    if (new_input) {
         // 実入力あり: 直近の速度を更新（新しい値を重めに反映する単純な平滑化）
         inertia->vx       = (int16_t)(((int32_t)inertia->vx + (int32_t)m->x * 3) / 4);
         inertia->vy       = (int16_t)(((int32_t)inertia->vy + (int32_t)m->y * 3) / 4);
         inertia->coasting = false;
     } else if (kb_scroll_inertia_enable_get() &&
                (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
-        // 入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
+        // 新規入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
         inertia->coasting = true;
         uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
         m->x               = inertia->vx;
@@ -256,6 +267,9 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
     int16_t x = divmod16(&m->x, div);
     int16_t y = divmod16(&m->y, div);
 #endif
+    // 次回呼び出し時の「新規入力なし」判定用に、消費後の残り（端数）を覚えておく
+    inertia->prev_remainder_x = m->x;
+    inertia->prev_remainder_y = m->y;
 
     // apply to mouse report.
 #if KEYBALL_MODEL == 61 || KEYBALL_MODEL == 39 || KEYBALL_MODEL == 147 || KEYBALL_MODEL == 44
