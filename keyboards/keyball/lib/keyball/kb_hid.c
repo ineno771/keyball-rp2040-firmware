@@ -182,7 +182,7 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
 
 #ifdef RGB_MATRIX_ENABLE
         // エフェクトID対応表（Web側の0-5をQMKモード番号に変換）
-        // 0:オフ 1:単色 2:呼吸 3:レインボー 4:リップル 5:リップル（複数同時）
+        // 0:オフ 1:単色 2:呼吸 3:レインボー 4:キー反応 5:キー反応（予備）
 #define LED_EFFECT_COUNT 6
 #ifdef RGB_MATRIX_CUSTOM_USER
         static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
@@ -190,8 +190,8 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             RGB_MATRIX_SOLID_COLOR,
             RGB_MATRIX_BREATHING,
             RGB_MATRIX_CYCLE_ALL,
-            RGB_MATRIX_CUSTOM_SOLID_RIPPLE,
-            RGB_MATRIX_CUSTOM_SOLID_RIPPLE,
+            RGB_MATRIX_CUSTOM_REACTIVE_KEYS,
+            RGB_MATRIX_CUSTOM_REACTIVE_KEYS,
         };
 #else
         static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
