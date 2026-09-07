@@ -85,6 +85,9 @@
 #define ENABLE_RGB_MATRIX_CYCLE_SPIRAL
 #define ENABLE_RGB_MATRIX_GRADIENT_UP_DOWN
 #define ENABLE_RGB_MATRIX_RAINDROPS
-#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_REACTIVE_KEYS
+// 起動時のモードはRGB_MATRIX_DEFAULT_MODEではなくkeyball_apply_normal_led()が
+// kb_led_config（EEPROM保存の独自管理領域）から反映するため、ここでは指定しない。
+// kb_led_configが未初期化(0xFF)の場合はkb_settings.cの既定値（呼吸相当のeffect_id=2）
+// が使われる。
 // 最大輝度（消費電力抑制、RGBLIGHT側と揃える）
 #define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150

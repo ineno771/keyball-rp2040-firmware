@@ -259,20 +259,21 @@ void keyball_set_precision_key(bool pressed);
 /// combine.
 void keyball_set_precision_layer(bool on);
 
-#ifdef RGBLIGHT_ENABLE
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
 /// keyball_seasonal_led_task renders the seasonal LED effects (Halloween/New Year/Easter/
 /// Christmas-style two-color crossfade) whenever the currently-effective LED config (global,
 /// or the active layer's override) selects one. It is self-contained: it independently
 /// re-derives the effective config every call from EEPROM + the local layer_state, so it
 /// works correctly on both split halves without needing a dedicated sync channel. No-op when
-/// the effective effect_id is a regular RGBLIGHT mode (rgblight_task() already handles that).
+/// the effective effect_id is a regular RGBLIGHT/RGB_MATRIX mode (the backend's own task
+/// already handles that).
 /// Call every matrix_scan_user tick.
 void keyball_seasonal_led_task(void);
 
 /// keyball_apply_normal_led applies the stored "normal" (layer 0) LED config to the live
-/// RGBLIGHT display right now (via the _noeeprom variants — kb_led_config in kb_settings is
-/// the persisted source of truth, not RGBLIGHT's own eeconfig). Call at boot, and after
-/// SET_LED when no layer override is currently active.
+/// RGBLIGHT/RGB_MATRIX display right now (via the _noeeprom variants — kb_led_config in
+/// kb_settings is the persisted source of truth, not the backend's own eeconfig). Call at
+/// boot, and after SET_LED when no layer override is currently active.
 void keyball_apply_normal_led(void);
 
 /// keyball_apply_layer_led reflects the layer-linked LED feature for the given highest active
@@ -285,7 +286,7 @@ void keyball_apply_layer_led(uint8_t hl);
 /// displayed (as opposed to the normal/layer-0 config). SET_LED uses this to decide whether
 /// changing the normal config should also change what's currently on screen.
 bool keyball_layer_led_overriding(void);
-#endif
+#endif // defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
 
 /// keyball_get_scrollsnap_mode gets current scroll snap mode.
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void);

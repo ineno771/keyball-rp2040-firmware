@@ -51,15 +51,28 @@ void kb_hid_receive(uint8_t *data, uint8_t length);
 // kb_hid.cとkeymap.c(レイヤー連動LED)の両方から使う唯一の変換元。
 uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id);
 uint8_t kb_hid_led_effect_count(void);
+#endif
 
-// 季節限定エフェクト（ハロウィン・イースター）。RGBLIGHT本体のモードとしては存在しない
-// （kb_hid_led_effect_to_mode()では0＝オフ相当が返る）ため、実際の描画は
-// keyball_seasonal_led_task()が別途行う。
-// - クリスマス(7)はRGBLIGHT本体のモードのまま（自作版は挙動が不安定だったため元に戻した）。
-// - ニューイヤー(12)・ナイトライダー(6)・交互点灯(10)は削除済み。欠番
-//   （交互点灯はスプリット両ハーフで正しく動かす方式が定まらなかったため一旦見送り）。
+#ifdef RGB_MATRIX_ENABLE
+// RGBLIGHT版のkb_hid_led_effect_to_mode()に相当するRGB_MATRIX版の変換元。
+// 実際のRGB_MATRIX_*定数（自作エフェクト含む）に変換する。範囲外のIDは0（オフ相当）扱い。
+uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id);
+#endif
+
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
+// 季節限定エフェクト（ハロウィン・イースター）。バックエンド本体のモードとしては存在
+// しない（kb_hid_led_effect_to_mode()/kb_hid_led_effect_to_rgb_matrix_mode()では
+// 0＝オフ相当が返る）ため、実際の描画はkeyball_seasonal_led_task()が別途行う。
+// このID自体はバックエンドに依存しない概念なので両対応で共有する。
+// - クリスマス(7)は各バックエンド本体のモードのまま。
+// - ニューイヤー(12)は削除済み・欠番。
+// - ナイトライダー(6)・交互点灯(10)はRGBLIGHT版でスプリット両ハーフの同期方式が
+//   定まらず一旦見送った欠番。RGB_MATRIX版では片側ハーフ内で完結する実装に直った
+//   ため対応表(kb_hid.c)には存在するが、Web UIのLED_EFFECTSは本家RGBLIGHT版とも
+//   共有しているため、そちらでは引き続き非表示にしている。
+// - 14はRGB_MATRIX版限定の追加エフェクト（キー反応・REACTIVE_KEYS）。
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
-#define KB_LED_EFFECT_TOTAL_COUNT    14  // 有効なeffect_idの総数（0-13。6・10・12は欠番）
+#define KB_LED_EFFECT_TOTAL_COUNT    15  // 有効なeffect_idの総数（0-14。6・10・12は欠番）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif

@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "keyball.h"
 #include "kb_settings.h"
 #include "drivers/pmw3360/pmw3360.h"
-#ifdef RGBLIGHT_ENABLE
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
 #    include "kb_hid.h"
 #    include "color.h"
 #endif
@@ -595,11 +595,12 @@ void keyball_set_precision_layer(bool on) {
     precision_apply();
 }
 
-#ifdef RGBLIGHT_ENABLE
-// レイヤー連動LED: 通常（レイヤー0）のLED設定はkb_led_config（kb_settings.c、RGBLIGHT本体の
-// EEPROM機能とは独立）に一元管理する。理由: オーバーライド中はRGBLIGHT本体の「現在の表示」が
-// レイヤー側の色になっているため、rgblight_get_*()を読んでも通常設定を復元できず、
-// オーバーライド中にSET_LEDされた変更がレイヤーを抜けた時に消えてしまう事故があった。
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
+// レイヤー連動LED: 通常（レイヤー0）のLED設定はkb_led_config（kb_settings.c、RGBLIGHT/
+// RGB_MATRIX本体のEEPROM機能とは独立）に一元管理する。理由: オーバーライド中はバックエンド
+// 本体の「現在の表示」がレイヤー側の色になっているため、本体側の状態を読んでも通常設定を
+// 復元できず、オーバーライド中にSET_LEDされた変更がレイヤーを抜けた時に消えてしまう事故が
+// あった。
 static bool g_layer_led_overriding = false;
 
 bool keyball_layer_led_overriding(void) {
@@ -608,6 +609,16 @@ bool keyball_layer_led_overriding(void) {
 
 void keyball_apply_normal_led(void) {
     kb_led_config_t cfg = kb_led_config_get();
+#ifdef RGB_MATRIX_ENABLE
+    if (cfg.effect_id == 0) {
+        rgb_matrix_disable_noeeprom();
+    } else {
+        rgb_matrix_enable_noeeprom();
+        rgb_matrix_mode_noeeprom(kb_hid_led_effect_to_rgb_matrix_mode(cfg.effect_id));
+        rgb_matrix_sethsv_noeeprom(cfg.hue, cfg.sat, cfg.val);
+        rgb_matrix_set_speed_noeeprom(cfg.speed);
+    }
+#else
     if (cfg.effect_id == 0) {
         rgblight_disable_noeeprom();
     } else {
@@ -616,6 +627,7 @@ void keyball_apply_normal_led(void) {
         rgblight_sethsv_noeeprom(cfg.hue, cfg.sat, cfg.val);
         rgblight_set_speed_noeeprom(cfg.speed);
     }
+#endif
 }
 
 void keyball_apply_layer_led(uint8_t hl) {
@@ -624,9 +636,15 @@ void keyball_apply_layer_led(uint8_t hl) {
 
     if (layer_led_on && layer_led.enabled) {
         g_layer_led_overriding = true;
+#ifdef RGB_MATRIX_ENABLE
+        rgb_matrix_mode_noeeprom(kb_hid_led_effect_to_rgb_matrix_mode(layer_led.effect_id));
+        rgb_matrix_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
+        rgb_matrix_set_speed_noeeprom(layer_led.speed);
+#else
         rgblight_mode_noeeprom(kb_hid_led_effect_is_seasonal(layer_led.effect_id) ? RGBLIGHT_MODE_STATIC_LIGHT : kb_hid_led_effect_to_mode(layer_led.effect_id));
         rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
         rgblight_set_speed_noeeprom(layer_led.speed);
+#endif
     } else if (g_layer_led_overriding) {
         g_layer_led_overriding = false;
         keyball_apply_normal_led();
@@ -662,8 +680,8 @@ static uint16_t g_seasonal_last_tick = 0;
 
 void keyball_seasonal_led_task(void) {
     // ハロウィン・イースター。effect_idの解決がスプリットのスレーブ側で不正確でも、
-    // マスターが毎フレームrgblight_sethsv_noeeprom()で色を押し出すことで標準の同期
-    // 経路にそのまま乗るため実害がない（詳細はファイル冒頭のコメント参照）。
+    // マスターが毎フレームsethsv_noeeprom()系で色を押し出すことで標準の同期経路に
+    // そのまま乗るため実害がない（詳細はファイル冒頭のコメント参照）。
     uint8_t        hl       = get_highest_layer(layer_state);
     kb_layer_led_t override = kb_layer_led_enable_get() ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
 
@@ -681,7 +699,7 @@ void keyball_seasonal_led_task(void) {
         speed                = cfg.speed;
     }
 
-    if (!kb_hid_led_effect_is_seasonal(effect_id)) return;  // 通常のRGBLIGHTモードはrgblight_task()に任せる
+    if (!kb_hid_led_effect_is_seasonal(effect_id)) return;  // 通常のモードはバックエンド本体のtaskに任せる
 
     uint16_t interval = 60 - ((uint16_t)speed * 55 / 255);  // 5〜60ms（speedが大きいほど速い）
     if (timer_elapsed(g_seasonal_last_tick) < interval) return;
@@ -710,12 +728,17 @@ void keyball_seasonal_led_task(void) {
 
     uint8_t blended_hue = (uint8_t)(hue_from + (diff * (int32_t)t) / 255);
 
+#ifdef RGB_MATRIX_ENABLE
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_SOLID_COLOR);
+    rgb_matrix_sethsv_noeeprom(blended_hue, sat, val);
+#else
     rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
     rgblight_sethsv_noeeprom(blended_hue, sat, val);
+#endif
 
     g_seasonal_pos = (uint8_t)((g_seasonal_pos + 1) % total);
 }
-#endif
+#endif // defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
 
 keyball_scrollsnap_mode_t keyball_get_scrollsnap_mode(void) {
 #if KEYBALL_SCROLLSNAP_ENABLE == 2
@@ -792,20 +815,11 @@ void keyboard_post_init_kb(void) {
 
     keyball_on_adjust_layout(KEYBALL_ADJUST_PENDING);
 
-#ifdef RGB_MATRIX_ENABLE
-    // 【暫定】波紋演出の動作確認用に、EEPROMのRGB_MATRIX設定を毎回強制的にデフォルト
-    // （波紋）へリセットする。このセッション中に複数のRGB_MATRIXビルド(LED_TEST等)を
-    // 書き込んでおりEEPROMに古い設定が残っていたため、以前はrgb_matrix_mode_noeeprom()
-    // で上書きを試みたが、この関数はrgb_matrix_config.enableが偽だと即座に何もせず
-    // 抜けてしまう仕様だった（rgb_matrix_mode_eeprom_helper内のガード）。
-    // eeconfig_update_rgb_matrix_default()はenable/mode/hsv等を直接まとめて上書きし
-    // EEPROMにも書き込むため、このガードの影響を受けず確実に反映できる。
-    // 本実装（GET/SET_LEDのRGB_MATRIX対応）が入ったらこのブロックは削除すること。
-    eeconfig_update_rgb_matrix_default();
-#endif
-
-#ifdef RGBLIGHT_ENABLE
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
     // 通常（レイヤー0）のLED設定をkb_led_config（独自管理）から起動時に反映する。
+    // RGB_MATRIX版もGET/SET_LEDがkb_led_config経由になったため、RGBLIGHT版と同様に
+    // ここで反映するだけでよい（以前はEEPROM未初期化を強制リセットする暫定処理が
+    // あったが、正式にkb_led_config経由になったので不要になった）。
     keyball_apply_normal_led();
 #endif
 

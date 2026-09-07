@@ -30,9 +30,17 @@ static uint8_t get_model_id(void) {
     return (uint8_t)KEYBALL_MODEL;
 }
 
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
+// 季節限定エフェクトかどうかの判定はバックエンドに依存しないIDだけの概念なので
+// 両対応で共有する（実装はkb_hid.h参照）。
+bool kb_hid_led_effect_is_seasonal(uint8_t effect_id) {
+    return effect_id == KB_LED_EFFECT_HALLOWEEN || effect_id == KB_LED_EFFECT_EASTER;
+}
+#endif
+
 #if defined(RGBLIGHT_ENABLE) && !defined(RGB_MATRIX_ENABLE)
 // エフェクトID対応表（Web側のID⇔QMKのRGBLIGHT_MODE_*）。
-// GET/SET_LEDだけでなく、レイヤー連動LED（keymap.c）からも参照する唯一の変換元。
+// GET/SET_LEDだけでなく、レイヤー連動LED（keyball.c）からも参照する唯一の変換元。
 #define LED_EFFECT_COUNT 11
 static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
     0,                             //  0: オフ
@@ -56,9 +64,47 @@ uint8_t kb_hid_led_effect_to_mode(uint8_t effect_id) {
 uint8_t kb_hid_led_effect_count(void) {
     return LED_EFFECT_COUNT;
 }
+#endif
 
-bool kb_hid_led_effect_is_seasonal(uint8_t effect_id) {
-    return effect_id == KB_LED_EFFECT_HALLOWEEN || effect_id == KB_LED_EFFECT_EASTER;
+#ifdef RGB_MATRIX_ENABLE
+// エフェクトID対応表（Web側のID⇔QMKのRGB_MATRIX_*）。RGBLIGHT版と同じ0-10のID体系に
+// 揃えてあるため、Web UI（keyball-configurator）のLED_EFFECTS一覧をそのまま流用できる。
+// GET/SET_LEDだけでなく、レイヤー連動LED（keyball.c）からも参照する唯一の変換元。
+#define RGB_MATRIX_LED_EFFECT_COUNT 11
+#define LED_EFFECT_ID_REACTIVE_KEYS 14  // RGB_MATRIX限定の追加エフェクト。この表には含めない
+#ifdef RGB_MATRIX_CUSTOM_USER
+static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
+    RGB_MATRIX_NONE,               //  0: オフ
+    RGB_MATRIX_SOLID_COLOR,        //  1: 単色
+    RGB_MATRIX_BREATHING,          //  2: 呼吸
+    RGB_MATRIX_CYCLE_ALL,          //  3: レインボー
+    RGB_MATRIX_CYCLE_SPIRAL,       //  4: スワール
+    RGB_MATRIX_CUSTOM_SNAKE,       //  5: スネーク
+    RGB_MATRIX_CUSTOM_KNIGHT,      //  6: ナイトライダー
+    RGB_MATRIX_CUSTOM_CHRISTMAS,   //  7: クリスマス
+    RGB_MATRIX_GRADIENT_UP_DOWN,   //  8: グラデーション
+    RGB_MATRIX_RAINDROPS,          //  9: きらめき
+    RGB_MATRIX_CUSTOM_ALTERNATING, // 10: 交互点灯
+};
+#else
+static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
+    RGB_MATRIX_NONE, RGB_MATRIX_SOLID_COLOR,  RGB_MATRIX_BREATHING,     RGB_MATRIX_CYCLE_ALL,
+    RGB_MATRIX_CYCLE_SPIRAL,     RGB_MATRIX_BREATHING, RGB_MATRIX_BREATHING, RGB_MATRIX_BREATHING,
+    RGB_MATRIX_GRADIENT_UP_DOWN, RGB_MATRIX_RAINDROPS, RGB_MATRIX_BREATHING,
+};
+#endif
+
+uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
+    if (kb_hid_led_effect_is_seasonal(effect_id)) {
+        // ハロウィン・イースターはモードをSOLID_COLORに固定し、実際の色相変化は
+        // keyball_seasonal_led_task()が毎フレームsethsv_noeeprom()で押し出す。
+        return RGB_MATRIX_SOLID_COLOR;
+    }
+#ifdef RGB_MATRIX_CUSTOM_USER
+    if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) return RGB_MATRIX_CUSTOM_REACTIVE_KEYS;
+#endif
+    if (effect_id >= RGB_MATRIX_LED_EFFECT_COUNT) effect_id = 0;
+    return RGB_MATRIX_LED_EFFECT_MAP[effect_id];
 }
 #endif
 
@@ -180,90 +226,12 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
-#ifdef RGB_MATRIX_ENABLE
-        // エフェクトID対応表（Web側のID⇔QMKのRGB_MATRIX_*）。
-        // ファイル先頭のRGBLIGHT版LED_EFFECT_MAP(0-10)と同じID体系に揃えてあるため
-        // Web UI（keyball-configurator）のLED_EFFECTS一覧はそのまま流用できる。
-        // 14番のみRGB_MATRIX限定の追加エフェクト（キー反応）で、RGBLIGHT側には無い
-        // ためLED_EFFECT_MAP配列には含めずGET/SET_LEDで個別に特別扱いする。
-#define LED_EFFECT_COUNT 11
-#define LED_EFFECT_ID_REACTIVE_KEYS 14
-#ifdef RGB_MATRIX_CUSTOM_USER
-        static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
-            RGB_MATRIX_NONE,             //  0: オフ
-            RGB_MATRIX_SOLID_COLOR,      //  1: 単色
-            RGB_MATRIX_BREATHING,        //  2: 呼吸
-            RGB_MATRIX_CYCLE_ALL,        //  3: レインボー
-            RGB_MATRIX_CYCLE_SPIRAL,     //  4: スワール
-            RGB_MATRIX_CUSTOM_SNAKE,     //  5: スネーク
-            RGB_MATRIX_CUSTOM_KNIGHT,    //  6: ナイトライダー
-            RGB_MATRIX_CUSTOM_CHRISTMAS, //  7: クリスマス
-            RGB_MATRIX_GRADIENT_UP_DOWN, //  8: グラデーション
-            RGB_MATRIX_RAINDROPS,        //  9: きらめき
-            RGB_MATRIX_CUSTOM_ALTERNATING, // 10: 交互点灯
-        };
-#else
-        static const uint8_t LED_EFFECT_MAP[LED_EFFECT_COUNT] = {
-            RGB_MATRIX_NONE,
-            RGB_MATRIX_SOLID_COLOR,
-            RGB_MATRIX_BREATHING,
-            RGB_MATRIX_CYCLE_ALL,
-            RGB_MATRIX_CYCLE_SPIRAL,
-            RGB_MATRIX_BREATHING,
-            RGB_MATRIX_BREATHING,
-            RGB_MATRIX_BREATHING,
-            RGB_MATRIX_GRADIENT_UP_DOWN,
-            RGB_MATRIX_RAINDROPS,
-            RGB_MATRIX_BREATHING,
-        };
-#endif
-
-        // 0x0B: LED設定を返す
-        // 応答: [cmd, effect_id, hue, sat, val, speed, status]
-        case KB_HID_CMD_GET_LED: {
-            uint8_t mode = rgb_matrix_get_mode();
-            uint8_t effect_id = 0;
-#ifdef RGB_MATRIX_CUSTOM_USER
-            if (mode == RGB_MATRIX_CUSTOM_REACTIVE_KEYS) {
-                effect_id = LED_EFFECT_ID_REACTIVE_KEYS;
-            } else
-#endif
-            {
-                for (uint8_t i = 0; i < LED_EFFECT_COUNT; i++) {
-                    if (LED_EFFECT_MAP[i] == mode) { effect_id = i; break; }
-                }
-            }
-            response[1] = effect_id;
-            response[2] = rgb_matrix_get_hue();
-            response[3] = rgb_matrix_get_sat();
-            response[4] = rgb_matrix_get_val();
-            response[5] = rgb_matrix_get_speed();
-            response[6] = KB_HID_STATUS_OK;
-            break;
-        }
-
-        // 0x0C: LED設定を変更してEEPROMに保存する
-        // 要求: [cmd, effect_id, hue, sat, val, speed]
-        // 応答: [cmd, status]
-        case KB_HID_CMD_SET_LED: {
-            uint8_t effect_id = data[1];
-#ifdef RGB_MATRIX_CUSTOM_USER
-            if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) {
-                rgb_matrix_mode(RGB_MATRIX_CUSTOM_REACTIVE_KEYS);
-            } else
-#endif
-            {
-                if (effect_id >= LED_EFFECT_COUNT) effect_id = 0;
-                rgb_matrix_mode(LED_EFFECT_MAP[effect_id]);
-            }
-            rgb_matrix_sethsv(data[2], data[3], data[4]);
-            rgb_matrix_set_speed(data[5]);
-            response[1] = KB_HID_STATUS_OK;
-            break;
-        }
-#elif defined(RGBLIGHT_ENABLE)
-        // エフェクトID対応表はファイル先頭のLED_EFFECT_MAP（file-scope）を使う。
-        // レイヤー連動LED（0x1A-0x1D）からも同じ表を参照するため。
+#if defined(RGB_MATRIX_ENABLE) || defined(RGBLIGHT_ENABLE)
+        // エフェクトID対応表はファイル先頭のLED_EFFECT_MAP/RGB_MATRIX_LED_EFFECT_MAP
+        // （file-scope）を使う。レイヤー連動LED（0x1A-0x1D）からも同じ表を参照するため。
+        // RGBLIGHT版・RGB_MATRIX版とも、実際に画面へ反映する処理はkeyball.cの
+        // keyball_apply_normal_led()に一本化してあるので、ここではkb_led_config
+        // （EEPROM保存の独自管理領域）の読み書きだけを行う。
 
         // 0x0B: 通常（レイヤー0）のLED設定を返す
         // 応答: [cmd, effect_id, hue, sat, val, speed, status]

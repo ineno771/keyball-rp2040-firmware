@@ -190,7 +190,7 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
 layer_state_t layer_state_set_user(layer_state_t state) {
     uint8_t hl = get_highest_layer(state);
 
-#ifdef RGBLIGHT_ENABLE
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
     // レイヤー連動LED: 有効化しているレイヤーに専用の光り方を設定していると、そのレイヤーに
     // いる間ずっとその光り方になる（抜けると通常のLED設定に戻る）。無効時・専用設定なし
     // レイヤーでは何もしない（通常のLED設定のまま）。実処理はkeyball.c側に集約している
@@ -212,7 +212,7 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 
 void matrix_scan_user(void) {
-#ifdef RGBLIGHT_ENABLE
+#if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
     keyball_seasonal_led_task();
 #endif
 
