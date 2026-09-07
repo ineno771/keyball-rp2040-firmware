@@ -33,6 +33,9 @@
 
 #define TAP_CODE_DELAY 5
 
+// OLED常時点灯（既定は無操作60秒でオフになる仕様のため、タイムアウトを無効化）
+#define OLED_TIMEOUT 0
+
 // 詳細設定: per-key オーバーライド（LED版では容量確保のため簡略化）
 #define TAPPING_TERM           200
 #define TAPPING_TERM_PER_KEY
