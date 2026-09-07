@@ -237,13 +237,6 @@ static keyball_scroll_inertia_t *keyball_scroll_inertia_of(const keyball_motion_
     return &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
 }
 
-// 慣性で滑らせる価値がある最低速度。base_div未満の速度はdivmod16の商が
-// 恒久的に0になり、スクロールを一切発生させないまま無駄にコマ数だけ
-// 消費し続けるだけになるため、これを開始・継続・停止のしきい値に共通で使う。
-static int16_t keyball_scroll_inertia_min_velocity(void) {
-    return (1 << (keyball_get_scroll_div() - 1)) * KEYBALL_SCROLL_DIV_BASE;
-}
-
 // motion_to_mouse()から参照し、スクロールモードがOFFでもこの物理ボール起点は
 // スクロール側の処理を呼び続けるべきかどうかを判定する。
 //
@@ -258,7 +251,7 @@ static int16_t keyball_scroll_inertia_min_velocity(void) {
 static bool keyball_scroll_inertia_should_apply(const keyball_motion_t *m) {
     if (!kb_scroll_inertia_enable_get()) return false;  // 無効時は素通し（move側の通常動作に任せる）
     keyball_scroll_inertia_t *inertia = keyball_scroll_inertia_of(m);
-    return inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= keyball_scroll_inertia_min_velocity();
+    return inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2;
 }
 
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
@@ -288,15 +281,19 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
         inertia->vy       = (int16_t)(((int32_t)inertia->vy + (int32_t)m->y * 3) / 4);
         inertia->coasting = false;
     } else if (kb_scroll_inertia_enable_get() &&
-               (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= base_div)) {
+               (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
         // 新規入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
         //
-        // 注意（重要）: m->xに「代入」ではなく「加算」しているのは、スクロールの
-        // 分周値（既定でbase_div=16相当）に対してvxが小さいと、divmod16の商が
-        // 毎回0になり続けて実際のスクロール量が一切発生しないまま慣性が終わって
-        // しまう不具合があったため。m->xは前回divmod16で割り切れなかった端数を
-        // 保持しているので、そこへ加算していけば実際のボール移動と同じ仕組みで
-        // 端数が蓄積し、いずれ分周値を超えた時点で正しくスクロールが発生する。
+        // 注意（重要・しきい値についての補足）: 開始/継続/停止のしきい値には
+        // base_div（分周値）ではなく小さい固定値(2)を使っている。一度は
+        // 「base_div未満の速度はdivmod16の商が毎回0でスクロールが発生しない」
+        // という理由でbase_divをしきい値にしてみたが、それは誤りだった。
+        // 下でm->xに「代入」ではなく「加算」しているため、たとえ1回あたりの
+        // 速度がbase_div未満でも、実際のボール移動と同じ仕組みで端数が
+        // 複数フレームにわたって蓄積し、いずれ分周値を超えた時点で正しく
+        // スクロールが発生する。base_divをしきい値にすると、まさにこの
+        // 「小さい速度が時間をかけて蓄積して発生する」ケースを開始前に
+        // 弾いてしまい、慣性そのものが働かなくなってしまっていた。
         if (!inertia->coasting) {
             // 滑走の開始時刻を記録する（万一の張り付き防止の安全弁用）
             inertia->coast_started_at = timer_read32();
@@ -307,7 +304,7 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
         m->y               = add16(m->y, inertia->vy);
         inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
         inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
-        if (abs(inertia->vx) + abs(inertia->vy) < base_div ||
+        if (abs(inertia->vx) + abs(inertia->vy) < 1 ||
             TIMER_DIFF_32(timer_read32(), inertia->coast_started_at) > KEYBALL_SCROLL_INERTIA_MAX_COAST_MS) {
             inertia->vx       = 0;
             inertia->vy       = 0;
