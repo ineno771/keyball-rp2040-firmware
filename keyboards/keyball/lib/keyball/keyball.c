@@ -227,11 +227,35 @@ static void keyball_scroll_inertia_reset(void) {
     memset(g_scroll_inertia, 0, sizeof(g_scroll_inertia));
 }
 
+static keyball_scroll_inertia_t *keyball_scroll_inertia_of(const keyball_motion_t *m) {
+    return &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
+}
+
+// 現在、この物理ボール起点で慣性スクロールが滑っている最中かどうか。
+// スクロールモードがOFFになった後もmotion_to_mouse()側から参照し、滑っている
+// 間はそのままkeyball_on_apply_motion_to_mouse_scroll()を呼び続けさせるために使う
+// （でないと、モードOFFの瞬間に慣性そのものが即座に打ち切られてしまう）。
+static bool keyball_scroll_inertia_is_coasting(const keyball_motion_t *m) {
+    return keyball_scroll_inertia_of(m)->coasting;
+}
+
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
     // 実際のボール入力（m->x/m->y、まだ消費されていない生の蓄積値）を消費する前に
     // 慣性スクロールの速度更新・合成モーションの注入を行う。
-    keyball_scroll_inertia_t *inertia   = &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
-    bool                      new_input = (m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y);
+    keyball_scroll_inertia_t *inertia = keyball_scroll_inertia_of(m);
+
+    // スクロールモード切替直後は、should_report()がボタン押下自体をボールの動きと
+    // 誤検出しないようm->x/m->yを強制的に0にする（KEYBALL_SCROLLBALL_INHIVITOR、
+    // 既定50ms）。この強制ゼロを「新規入力」と誤判定すると、慣性で滑らせたい
+    // まさにその瞬間（モードOFF直後）に速度が握りつぶされてしまうため、この
+    // 期間中は新規入力判定そのものを無効化する（滑っている速度・状態はそのまま
+    // 維持し、既存の慣性判定へフォールスルーさせる）。
+#if defined(KEYBALL_SCROLLBALL_INHIVITOR) && KEYBALL_SCROLLBALL_INHIVITOR > 0
+    bool inhibited = TIMER_DIFF_32(timer_read32(), keyball.scroll_mode_changed) < KEYBALL_SCROLLBALL_INHIVITOR;
+#else
+    bool inhibited = false;
+#endif
+    bool new_input = !inhibited && ((m->x != inertia->prev_remainder_x) || (m->y != inertia->prev_remainder_y));
     if (new_input) {
         // 実入力あり: 直近の速度を更新（新しい値を重めに反映する単純な平滑化）
         inertia->vx       = (int16_t)(((int32_t)inertia->vx + (int32_t)m->x * 3) / 4);
@@ -321,7 +345,10 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
 }
 
 static void motion_to_mouse(keyball_motion_t *m, report_mouse_t *r, bool is_left, bool as_scroll) {
-    if (as_scroll) {
+    // スクロールモードが既にOFFでも、慣性で滑っている最中はスクロール側の処理を
+    // 呼び続ける。ここでas_scroll単体の判定にしてしまうと、モードOFFになった
+    // 瞬間に慣性が打ち切られてしまう（本来はここからしばらく滑らせたい）。
+    if (as_scroll || keyball_scroll_inertia_is_coasting(m)) {
         keyball_on_apply_motion_to_mouse_scroll(m, r, is_left);
     } else {
         keyball_on_apply_motion_to_mouse_move(m, r, is_left);
@@ -606,10 +633,13 @@ bool keyball_get_scroll_mode(void) {
 void keyball_set_scroll_mode(bool mode) {
     if (mode != keyball.scroll_mode) {
         keyball.scroll_mode_changed = timer_read32();
-        // スクロールモードの切り替わり時に慣性の速度もリセットする。残したままだと
-        // しばらく経ってから再度スクロールモードに入った時に古い速度で急に滑り
-        // 出してしまう。
-        keyball_scroll_inertia_reset();
+        // OFF→ONの時だけ慣性の速度をリセットする。しばらく経ってから再度
+        // スクロールモードに入った時に古い速度で急に滑り出すのを防ぐため。
+        // ON→OFFの時はリセットしない（弾いた後に指を離した瞬間こそ慣性で
+        // 滑らせたい瞬間なので、ここで消してしまうと機能そのものが働かなくなる）。
+        if (mode) {
+            keyball_scroll_inertia_reset();
+        }
     }
     keyball.scroll_mode = mode;
 }
