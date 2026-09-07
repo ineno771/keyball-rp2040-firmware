@@ -231,12 +231,21 @@ static keyball_scroll_inertia_t *keyball_scroll_inertia_of(const keyball_motion_
     return &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
 }
 
-// 現在、この物理ボール起点で慣性スクロールが滑っている最中かどうか。
-// スクロールモードがOFFになった後もmotion_to_mouse()側から参照し、滑っている
-// 間はそのままkeyball_on_apply_motion_to_mouse_scroll()を呼び続けさせるために使う
-// （でないと、モードOFFの瞬間に慣性そのものが即座に打ち切られてしまう）。
-static bool keyball_scroll_inertia_is_coasting(const keyball_motion_t *m) {
-    return keyball_scroll_inertia_of(m)->coasting;
+// motion_to_mouse()から参照し、スクロールモードがOFFでもこの物理ボール起点は
+// スクロール側の処理を呼び続けるべきかどうかを判定する。
+//
+// 注意（重要）: 判定材料を「coastingフラグが既にtrueかどうか」だけにすると
+// 取りこぼす。トリガーキーとボールをほぼ同時に離す自然な操作では、「まだ
+// 実入力があった最後のフレーム」の直後に「モードOFF」が来てしまい、
+// coastingフラグが一度もtrueになる前にmotion_to_mouse()が「移動」側に
+// 切り替わってしまう（スクロール側の関数が呼ばれないと、そもそも
+// coasting=trueにする判定処理自体が実行されない）。そのため、既にcoasting中
+// でなくても「直近の速度がまだ十分残っている」場合は同様にスクロール側を
+// 呼び続けるようにしている。
+static bool keyball_scroll_inertia_should_apply(const keyball_motion_t *m) {
+    if (!kb_scroll_inertia_enable_get()) return false;  // 無効時は素通し（move側の通常動作に任せる）
+    keyball_scroll_inertia_t *inertia = keyball_scroll_inertia_of(m);
+    return inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2;
 }
 
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
@@ -348,7 +357,7 @@ static void motion_to_mouse(keyball_motion_t *m, report_mouse_t *r, bool is_left
     // スクロールモードが既にOFFでも、慣性で滑っている最中はスクロール側の処理を
     // 呼び続ける。ここでas_scroll単体の判定にしてしまうと、モードOFFになった
     // 瞬間に慣性が打ち切られてしまう（本来はここからしばらく滑らせたい）。
-    if (as_scroll || keyball_scroll_inertia_is_coasting(m)) {
+    if (as_scroll || keyball_scroll_inertia_should_apply(m)) {
         keyball_on_apply_motion_to_mouse_scroll(m, r, is_left);
     } else {
         keyball_on_apply_motion_to_mouse_move(m, r, is_left);
