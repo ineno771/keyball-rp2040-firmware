@@ -149,3 +149,21 @@ typedef struct {
 #define KB_LED_CONFIG_EEPROM 0x0A11  // 5バイト（0x0A11-0x0A15）
 kb_led_config_t kb_led_config_get(void);
 void            kb_led_config_set(const kb_led_config_t *cfg);
+
+// ── 慣性スクロール（ボールを弾いた後もしばらくスクロールが減衰しながら続く）──
+// 強さの上限を254に制限しているのは、EEPROM未初期化時の値0xFF(255)と衝突させない
+// ため（255まで許すと、ユーザーが明示的に255を選んでも再起動後に未初期化と誤認され
+// デフォルト値に戻ってしまう）。
+#define KB_SCROLL_INERTIA_ENABLE_EEPROM    0x0A16  // 有効/無効（1バイト）
+#define KB_SCROLL_INERTIA_STRENGTH_EEPROM  0x0A17  // 強さ（1バイト）
+#define KB_SCROLL_INERTIA_STRENGTH_MIN     0
+#define KB_SCROLL_INERTIA_STRENGTH_MAX     254
+#define KB_SCROLL_INERTIA_STRENGTH_DEFAULT 128
+
+// 慣性スクロール機能そのものの有効/無効（既定: 無効）
+bool kb_scroll_inertia_enable_get(void);
+void kb_scroll_inertia_enable_set(bool v);
+
+// 慣性の強さ（0-254、大きいほど長く・遠くまで滑る。既定128）
+uint8_t kb_scroll_inertia_strength_get(void);
+void    kb_scroll_inertia_strength_set(uint8_t v);

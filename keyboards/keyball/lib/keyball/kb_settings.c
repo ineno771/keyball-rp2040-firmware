@@ -240,3 +240,41 @@ void kb_led_config_set(const kb_led_config_t *cfg) {
     g_led_config_loaded = true;
     eeprom_write_block(cfg, (void *)(uintptr_t)KB_LED_CONFIG_EEPROM, sizeof(*cfg));
 }
+
+// ── 慣性スクロール有効フラグ（レイヤー連動LED有効フラグと同パターン）──────
+static uint8_t g_scroll_inertia_enable        = 0xEE;
+static bool    g_scroll_inertia_enable_loaded = false;
+
+bool kb_scroll_inertia_enable_get(void) {
+    if (!g_scroll_inertia_enable_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_ENABLE_EEPROM);
+        g_scroll_inertia_enable        = (v == 1) ? 1 : 0;  // 未初期化(0xFF)・不正値は無効扱い
+        g_scroll_inertia_enable_loaded = true;
+    }
+    return g_scroll_inertia_enable != 0;
+}
+
+void kb_scroll_inertia_enable_set(bool v) {
+    g_scroll_inertia_enable        = v ? 1 : 0;
+    g_scroll_inertia_enable_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_ENABLE_EEPROM, g_scroll_inertia_enable);
+}
+
+// ── 慣性スクロールの強さ（未初期化(0xFF)ならデフォルトへ。0-254のみ有効値）───
+static uint16_t g_scroll_inertia_strength        = 0xFFFF;
+static bool     g_scroll_inertia_strength_loaded = false;
+
+uint8_t kb_scroll_inertia_strength_get(void) {
+    if (!g_scroll_inertia_strength_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_STRENGTH_EEPROM);
+        g_scroll_inertia_strength        = (v > KB_SCROLL_INERTIA_STRENGTH_MAX) ? KB_SCROLL_INERTIA_STRENGTH_DEFAULT : v;
+        g_scroll_inertia_strength_loaded = true;
+    }
+    return (uint8_t)g_scroll_inertia_strength;
+}
+
+void kb_scroll_inertia_strength_set(uint8_t v) {
+    g_scroll_inertia_strength        = (v > KB_SCROLL_INERTIA_STRENGTH_MAX) ? KB_SCROLL_INERTIA_STRENGTH_MAX : v;
+    g_scroll_inertia_strength_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_STRENGTH_EEPROM, (uint8_t)g_scroll_inertia_strength);
+}

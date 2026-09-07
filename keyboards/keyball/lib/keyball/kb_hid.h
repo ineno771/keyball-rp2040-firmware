@@ -35,6 +35,8 @@
 #define KB_HID_CMD_SET_LAYER_LED_ENABLE 0x1B  // レイヤー連動LED機能の有効/無効変更
 #define KB_HID_CMD_GET_LAYER_LED        0x1C  // 指定レイヤーのLED設定取得
 #define KB_HID_CMD_SET_LAYER_LED        0x1D  // 指定レイヤーのLED設定変更
+#define KB_HID_CMD_GET_SCROLL_INERTIA   0x1E  // 慣性スクロール設定取得
+#define KB_HID_CMD_SET_SCROLL_INERTIA   0x1F  // 慣性スクロール設定変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00

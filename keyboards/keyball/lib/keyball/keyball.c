@@ -201,7 +201,47 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
     m->y = 0;
 }
 
+// ── 慣性スクロール ────────────────────────────────────────────
+// ボールを弾いた直後の速度を覚えておき、ボールが止まった後もその速度を
+// 徐々に減衰させながら合成モーションとして注入し続けることで「弾いた後も
+// しばらく滑るように」スクロールが続く演出を実現する。this_motion用/
+// that_motion用で別々に状態を持つ必要があるため、m（呼び出し元が渡してくる
+// ポインタ）がkeyball.this_motionかkeyball.that_motionかで添字を分ける。
+typedef struct {
+    int16_t vx, vy;    // 直近の速度推定値（生のセンサーカウント/呼び出し相当）
+    bool    coasting;  // 現在、慣性で滑っている最中か
+} keyball_scroll_inertia_t;
+static keyball_scroll_inertia_t g_scroll_inertia[2];  // [0]=this_motion起点 [1]=that_motion起点
+
+static void keyball_scroll_inertia_reset(void) {
+    memset(g_scroll_inertia, 0, sizeof(g_scroll_inertia));
+}
+
 __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motion_t *m, report_mouse_t *r, bool is_left) {
+    // 実際のボール入力（m->x/m->y、まだ消費されていない生の蓄積値）を消費する前に
+    // 慣性スクロールの速度更新・合成モーションの注入を行う。
+    keyball_scroll_inertia_t *inertia = &g_scroll_inertia[(m == &keyball.this_motion) ? 0 : 1];
+    if (m->x != 0 || m->y != 0) {
+        // 実入力あり: 直近の速度を更新（新しい値を重めに反映する単純な平滑化）
+        inertia->vx       = (int16_t)(((int32_t)inertia->vx + (int32_t)m->x * 3) / 4);
+        inertia->vy       = (int16_t)(((int32_t)inertia->vy + (int32_t)m->y * 3) / 4);
+        inertia->coasting = false;
+    } else if (kb_scroll_inertia_enable_get() &&
+               (inertia->coasting || (abs(inertia->vx) + abs(inertia->vy)) >= 2)) {
+        // 入力なし・慣性ON・十分な速度が残っている: 減衰させながら滑らせる
+        inertia->coasting = true;
+        uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
+        m->x               = inertia->vx;
+        m->y               = inertia->vy;
+        inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
+        inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
+        if (abs(inertia->vx) + abs(inertia->vy) < 1) {
+            inertia->vx       = 0;
+            inertia->vy       = 0;
+            inertia->coasting = false;
+        }
+    }
+
     int16_t base_div = (1 << (keyball_get_scroll_div() - 1)) * KEYBALL_SCROLL_DIV_BASE;
 #ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
     // 高解像度スクロール: 生の動きを分解能でスケールして送り、OS側で細かく刻ませる（滑らか）
@@ -552,6 +592,10 @@ bool keyball_get_scroll_mode(void) {
 void keyball_set_scroll_mode(bool mode) {
     if (mode != keyball.scroll_mode) {
         keyball.scroll_mode_changed = timer_read32();
+        // スクロールモードの切り替わり時に慣性の速度もリセットする。残したままだと
+        // しばらく経ってから再度スクロールモードに入った時に古い速度で急に滑り
+        // 出してしまう。
+        keyball_scroll_inertia_reset();
     }
     keyball.scroll_mode = mode;
 }
