@@ -314,7 +314,8 @@ static bool TRACKBALL(effect_params_t* params) {
         hold_speed   = mag > 255 ? 255 : (uint8_t)mag;
     }
 
-    const uint16_t DECAY_MS = 600;  // 動きが止まってから元の色に戻るまでの時間
+    // 動きが止まってから元の色に戻るまでの時間。speedが大きいほど短く（キビキビ）なる
+    const uint16_t DECAY_MS = 900 - ((uint16_t)rgb_matrix_config.speed * 700 / 255);  // 200〜900ms
     uint16_t       elapsed  = timer_elapsed(last_move_tick);
     uint8_t        glow     = (elapsed >= DECAY_MS) ? 0 : (uint8_t)((uint32_t)hold_speed * (DECAY_MS - elapsed) / DECAY_MS);
 
@@ -346,7 +347,8 @@ static bool RIPPLE(effect_params_t* params) {
     static uint8_t  ripple_y[RIPPLE_SLOT_COUNT];
     static bool     ripple_active[RIPPLE_SLOT_COUNT];
 
-    const uint16_t RIPPLE_MS    = 700;  // 波紋が広がりきるまでの時間
+    // 波紋が広がりきるまでの時間。speedが大きいほど短く（速く）なる
+    const uint16_t RIPPLE_MS    = 1200 - ((uint16_t)rgb_matrix_config.speed * 1000 / 255);  // 200〜1200ms
     const uint8_t  RIPPLE_MAX_R = 100;  // 広がる最大半径（座標系はx:0-224,y:0-64程度）
     const uint8_t  RIPPLE_WIDTH = 30;   // リングの太さ
 
