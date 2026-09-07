@@ -88,10 +88,9 @@
 #define ENABLE_RGB_MATRIX_CYCLE_ALL
 #define ENABLE_RGB_MATRIX_CYCLE_SPIRAL
 #define ENABLE_RGB_MATRIX_GRADIENT_UP_DOWN
-// タイピングヒートマップ（組み込み）。キーごとに押した回数をframe bufferに
-// 蓄積するため専用のバッファ機能を有効化する必要がある。
-#define RGB_MATRIX_FRAMEBUFFER_EFFECTS
-#define ENABLE_RGB_MATRIX_TYPING_HEATMAP
+// タイピングヒートマップは組み込み(TYPING_HEATMAP)ではなくrgb_matrix_user.incの
+// 自作HEATMAPを使う（組み込み版は隣接キーへの熱伝播や色相固定が要望に合わなかった
+// ため）。よってRGB_MATRIX_FRAMEBUFFER_EFFECTSは不要。
 // 起動時のモードはRGB_MATRIX_DEFAULT_MODEではなくkeyball_apply_normal_led()が
 // kb_led_config（EEPROM保存の独自管理領域）から反映するため、ここでは指定しない。
 // kb_led_configが未初期化(0xFF)の場合はkb_settings.cの既定値（呼吸相当のeffect_id=2）

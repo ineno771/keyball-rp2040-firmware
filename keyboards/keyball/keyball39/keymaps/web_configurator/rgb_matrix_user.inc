@@ -38,6 +38,14 @@ RGB_MATRIX_EFFECT(TRACKBALL)
 // （本人希望。REACTIVE_KEYSと同じ扱い）。
 RGB_MATRIX_EFFECT(RIPPLE)
 
+// HEATMAP: 押したキーだけをLEDインデックス単位で蓄熱・減衰させる自作タイピング
+// ヒートマップ。QMK組み込みのTYPING_HEATMAPは
+// (1) 隣接キーにも熱が伝播するため押していないキーまで反応する
+// (2) 色相を熱量から内部計算する固定仕様で、ユーザーの色相設定を無視する
+// という2点が要望に合わなかったため、g_last_hit_trackerとLEDごとの蓄熱テーブルに
+// よる自作実装に置き換えている（色相・彩度はrgb_matrix_config.hsvをそのまま使う）。
+RGB_MATRIX_EFFECT(HEATMAP)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 // TRACKBALL専用: keyball.this_motion/that_motion（トラックボールの移動量）を
@@ -352,6 +360,14 @@ static bool RIPPLE(effect_params_t* params) {
     const uint8_t  RIPPLE_MAX_R = 100;  // 広がる最大半径（座標系はx:0-224,y:0-64程度）
     const uint8_t  RIPPLE_WIDTH = 30;   // リングの太さ
 
+    // マトリクス状態は両ハーフ間で同期されているため、g_last_hit_trackerには
+    // 反対側ハーフのキーのヒットも記録される。座標ベースのRIPPLEはこれを素通しすると
+    // 波紋の中心座標が反対側ハーフの物理位置になり、中央付近のキー（col4等）を押した際に
+    // 反対側ハーフのLEDまで反応してしまう（TWINKLE修正時と同じ理由でper-iterの
+    // led_min/led_maxではなくハーフ全体の安定した範囲で判定する必要がある）。
+    uint8_t half_min = is_keyboard_left() ? 0 : 22;
+    uint8_t half_max = is_keyboard_left() ? 22 : RGB_MATRIX_LED_COUNT;
+
     // 新規ヒットを取り込む。g_last_hit_trackerはREACTIVE_KEYSと同じく「十分新しい
     // ものだけ」判定で、長時間使用時にtickが古い情報を誤って取り込むのを防ぐ。
     uint8_t cnt = g_last_hit_tracker.count;
@@ -360,6 +376,7 @@ static bool RIPPLE(effect_params_t* params) {
         if (g_last_hit_tracker.tick[j] > 30) continue;
         uint8_t idx = g_last_hit_tracker.index[j];
         if (idx >= RGB_MATRIX_LED_COUNT) continue;
+        if (idx < half_min || idx >= half_max) continue;  // 反対側ハーフのキーは無視
         if (g_led_config.flags[idx] & LED_FLAG_UNDERGLOW) continue;  // アンダーグローは起点にしない
 
         uint8_t slot = RIPPLE_SLOT_COUNT;
@@ -442,6 +459,63 @@ static bool ALTERNATING(effect_params_t* params) {
         HSV  out         = hsv;
         out.v            = (first_group == phase) ? hsv.v : 0;
         RGB rgb          = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// HEATMAP: 押したキーのLEDだけに熱量(0-255)を持たせ、押すたびに加算・時間経過で
+// 減衰させる。明るさ(v)だけを熱量で変化させ、色相・彩度はrgb_matrix_config.hsvを
+// そのまま使うため、組み込み版と違って色相調整が効く。
+// アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
+// （RIPPLE・REACTIVE_KEYSと同じ扱い）。
+#define HEATMAP_INCREASE_STEP    32   // 1打鍵あたりの熱量増加
+#define HEATMAP_DECAY_INTERVAL_MS 25  // この間隔ごとに熱量を1ずつ下げる
+static bool HEATMAP(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    static uint8_t  heat[RGB_MATRIX_LED_COUNT];
+    static uint16_t heat_last_tick[RGB_MATRIX_LED_COUNT];
+    static bool     heat_init = false;
+    if (!heat_init) {
+        // g_last_hit_tracker.tickの初期値0と衝突しないよう、大きな値で初期化しておく
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) heat_last_tick[i] = 0xFFFF;
+        heat_init = true;
+    }
+
+    // 新規ヒットのみ蓄熱する。g_last_hit_trackerは同じ押下がtick<=30の間、複数フレーム
+    // に渡って観測され続けるため、「前回見た時よりtickが小さくなった＝新しい押下」の
+    // 場合だけ加算することで二重加算を防いでいる（RIPPLE等と違い、蓄積値を扱うため
+    // 二重加算すると熱量が実際の打鍵より早く上がってしまう）。
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
+        uint8_t idx = g_last_hit_tracker.index[j];
+        if (idx >= RGB_MATRIX_LED_COUNT) continue;
+        if (g_last_hit_tracker.tick[j] < heat_last_tick[idx]) {
+            heat[idx] = qadd8(heat[idx], HEATMAP_INCREASE_STEP);
+        }
+        heat_last_tick[idx] = g_last_hit_tracker.tick[j];
+    }
+
+    // 熱量の減衰タイミング判定はフレーム全体で1回だけ行う
+    // （TYPING_HEATMAP同様、複数iterに分かれてもタイマーは1回しか進めない）
+    static uint16_t decay_last_tick = 0;
+    static bool     do_decay        = false;
+    if (params->iter == 0) {
+        do_decay = timer_elapsed(decay_last_tick) >= HEATMAP_DECAY_INTERVAL_MS;
+        if (do_decay) decay_last_tick = timer_read();
+    }
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
+            out.v = scale8(heat[i], base.v);
+            if (do_decay && heat[i] > 0) heat[i]--;
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
     return rgb_matrix_check_finished_leds(led_max);

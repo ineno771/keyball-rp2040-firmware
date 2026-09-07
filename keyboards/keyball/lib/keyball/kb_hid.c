@@ -99,15 +99,16 @@ static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
 #endif
 
 uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
-#ifdef ENABLE_RGB_MATRIX_TYPING_HEATMAP
-    if (effect_id == LED_EFFECT_ID_TYPING_HEATMAP) return RGB_MATRIX_TYPING_HEATMAP;
-#endif
 #ifdef RGB_MATRIX_CUSTOM_USER
     // ハロウィン・イースターはクリスマスと同じ「市松模様に交互点灯」する自作エフェクトを
     // 使う（RGBLIGHT版の単色クロスフェードとは動きを変えている。本人希望）。
     if (effect_id == KB_LED_EFFECT_HALLOWEEN) return RGB_MATRIX_CUSTOM_HALLOWEEN;
     if (effect_id == KB_LED_EFFECT_EASTER) return RGB_MATRIX_CUSTOM_EASTER;
     if (effect_id == LED_EFFECT_ID_REACTIVE_KEYS) return RGB_MATRIX_CUSTOM_REACTIVE_KEYS;
+    // タイピングヒートマップは組み込みのRGB_MATRIX_TYPING_HEATMAPではなく自作の
+    // RGB_MATRIX_CUSTOM_HEATMAPを使う（組み込み版は隣接キーへの熱の伝播があり
+    // 押していないキーも反応する上、色相がユーザー設定を無視して固定される仕様のため）。
+    if (effect_id == LED_EFFECT_ID_TYPING_HEATMAP) return RGB_MATRIX_CUSTOM_HEATMAP;
     if (effect_id == LED_EFFECT_ID_TRACKBALL) return RGB_MATRIX_CUSTOM_TRACKBALL;
     if (effect_id == LED_EFFECT_ID_RIPPLE) return RGB_MATRIX_CUSTOM_RIPPLE;
 #endif

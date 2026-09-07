@@ -71,7 +71,8 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id);
 //   ため対応表(kb_hid.c)には存在するが、Web UIのLED_EFFECTSは本家RGBLIGHT版とも
 //   共有しているため、そちらでは引き続き非表示にしている。
 // - 14・15・16・17はRGB_MATRIX版限定の追加エフェクト：
-//   14=リアクティブ(REACTIVE_KEYS) 15=タイピングヒートマップ(TYPING_HEATMAP、組み込み)
+//   14=リアクティブ(REACTIVE_KEYS) 15=タイピングヒートマップ(HEATMAP、自作。
+//   組み込みTYPING_HEATMAPは隣接キーへの熱伝播や色相固定が要望に合わず不採用)
 //   16=トラックボールリアクティブ(TRACKBALL) 17=リップル(RIPPLE)
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
