@@ -167,7 +167,7 @@ void            kb_led_config_set(const kb_led_config_t *cfg);
 #define KB_SCROLL_INERTIA_FLICK_MULT_EEPROM   0x0A18  // 発動しきい値の倍率×10（1バイト）
 #define KB_SCROLL_INERTIA_FLICK_MULT_MIN      1    // 0.1倍
 #define KB_SCROLL_INERTIA_FLICK_MULT_MAX      30   // 3.0倍
-#define KB_SCROLL_INERTIA_FLICK_MULT_DEFAULT  30   // 3.0倍
+#define KB_SCROLL_INERTIA_FLICK_MULT_DEFAULT  25   // 2.5倍
 
 // 慣性スクロール機能そのものの有効/無効（既定: 無効）
 bool kb_scroll_inertia_enable_get(void);
