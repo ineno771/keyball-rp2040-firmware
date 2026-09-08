@@ -218,9 +218,10 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
 // 覚えておき、そこから変化していない場合だけ「新規入力なし」と判定する。
 typedef struct {
     int16_t  vx, vy;                              // 滑走中の速度（減衰していく値）
-    int16_t  peak_vx, peak_vy;                    // 直近の一連の動きで観測した最大速度（フリックの勢い）
+    int16_t  peak_vx, peak_vy;                    // 今の一連の動きで観測した最大速度（フリックの勢い）
     int16_t  prev_remainder_x, prev_remainder_y;  // 前回消費後にm->x/m->yへ残っていたはずの値
     bool     coasting;                            // 現在、慣性で滑っている最中か
+    bool     streak_active;                       // 実入力が連続している一連の動きの最中か（ピークの区切り判定用）
     uint32_t coast_started_at;                    // 滑走を開始した時刻（万一の張り付き防止の安全弁用）
 } keyball_scroll_inertia_t;
 
@@ -314,43 +315,63 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
         // 実入力あり: ピーク速度を更新する（一連の動きの中で一番速かった
         // 瞬間を覚えておき、指を離す直前にたまたま減速していても取りこぼ
         // さないようにする）。
-        inertia->coasting = false;
+        //
+        // 注意（重要）: streak_activeが立っていない（＝止まっていた状態から
+        // 今回はじめて動き出した）場合は、まずピークをリセットしてから今回の
+        // サンプルだけを見る。リセットしないと、以前の（無関係な・逆方向の
+        // こともある）一連の動きで記録された古いピークがいつまでも居座り
+        // 続け、今回はゆっくり上にスクロールしたつもりが、古い「下方向への
+        // 速い動き」のピークがまだ大きいという理由で下方向に滑ってしまう、
+        // 上下（または左右）が逆転する不具合の原因になっていた。
+        if (!inertia->streak_active) {
+            inertia->peak_vx = 0;
+            inertia->peak_vy = 0;
+        }
+        inertia->streak_active = true;
+        inertia->coasting      = false;
         if (abs(m->x) > abs(inertia->peak_vx)) inertia->peak_vx = m->x;
         if (abs(m->y) > abs(inertia->peak_vy)) inertia->peak_vy = m->y;
-    } else if (kb_scroll_inertia_enable_get() &&
-               (inertia->coasting || (abs(inertia->peak_vx) + abs(inertia->peak_vy)) >= min_flick)) {
-        // 新規入力なし・慣性ON・ピーク速度が「速く弾いた」と言えるレベルに
-        // 達している（またはすでに滑走中）: 減衰させながら滑らせる。
-        //
-        // 注意（重要）: 滑走を開始した後の継続・停止判定はpeak_vxではなく
-        // inertia->vx（滑走中に減衰していく値）を見る。継続判定にmin_flick
-        // のようなbase_div基準のしきい値を使うと、減衰の終盤（base_div未満）
-        // で強制停止してしまうが、下でm->xに「代入」ではなく「加算」して
-        // いるため、base_div未満の速度でも複数フレームかけて蓄積しいずれ
-        // 分周値を超えた時点で正しくスクロールが発生する。継続判定を厳しく
-        // すると、この「小さい速度が時間をかけて発生する」ケースを潰して
-        // しまう。
-        if (!inertia->coasting) {
-            // 滑走開始: ピーク速度にブースト倍率をかけたものを初速にする
-            // （本人希望：ボールの回転の速さで慣性の効きを変える。速く弾く
-            // ほどピーク速度が大きく、より強く・長く滑るようになる）。
-            inertia->vx = keyball_clip_int16((int32_t)inertia->peak_vx * KEYBALL_SCROLL_INERTIA_BOOST);
-            inertia->vy = keyball_clip_int16((int32_t)inertia->peak_vy * KEYBALL_SCROLL_INERTIA_BOOST);
-            inertia->peak_vx        = 0;
-            inertia->peak_vy        = 0;
-            inertia->coast_started_at = timer_read32();
-        }
-        inertia->coasting = true;
-        uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
-        m->x               = add16(m->x, inertia->vx);
-        m->y               = add16(m->y, inertia->vy);
-        inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
-        inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
-        if (abs(inertia->vx) + abs(inertia->vy) < 1 ||
-            TIMER_DIFF_32(timer_read32(), inertia->coast_started_at) > KEYBALL_SCROLL_INERTIA_MAX_COAST_MS) {
-            inertia->vx       = 0;
-            inertia->vy       = 0;
-            inertia->coasting = false;
+    } else {
+        // 新規入力なし: 一連の動きは途切れた。次にnew_inputになった時は
+        // 新しい一連の動きとしてピークを取り直す（上のstreak_activeの
+        // リセット処理を参照）。
+        inertia->streak_active = false;
+        if (kb_scroll_inertia_enable_get() &&
+            (inertia->coasting || (abs(inertia->peak_vx) + abs(inertia->peak_vy)) >= min_flick)) {
+            // 慣性ON・ピーク速度が「速く弾いた」と言えるレベルに達している
+            // （またはすでに滑走中）: 減衰させながら滑らせる。
+            //
+            // 注意（重要）: 滑走を開始した後の継続・停止判定はpeak_vxではなく
+            // inertia->vx（滑走中に減衰していく値）を見る。継続判定にmin_flick
+            // のようなbase_div基準のしきい値を使うと、減衰の終盤（base_div未満）
+            // で強制停止してしまうが、下でm->xに「代入」ではなく「加算」して
+            // いるため、base_div未満の速度でも複数フレームかけて蓄積しいずれ
+            // 分周値を超えた時点で正しくスクロールが発生する。継続判定を厳しく
+            // すると、この「小さい速度が時間をかけて発生する」ケースを潰して
+            // しまう。
+            if (!inertia->coasting) {
+                // 滑走開始: ピーク速度にブースト倍率をかけたものを初速にする
+                // （本人希望：ボールの回転の速さで慣性の効きを変える。速く
+                // 弾くほどピーク速度が大きく、より強く・長く滑るように
+                // なる）。
+                inertia->vx = keyball_clip_int16((int32_t)inertia->peak_vx * KEYBALL_SCROLL_INERTIA_BOOST);
+                inertia->vy = keyball_clip_int16((int32_t)inertia->peak_vy * KEYBALL_SCROLL_INERTIA_BOOST);
+                inertia->peak_vx          = 0;
+                inertia->peak_vy          = 0;
+                inertia->coast_started_at = timer_read32();
+            }
+            inertia->coasting = true;
+            uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
+            m->x               = add16(m->x, inertia->vx);
+            m->y               = add16(m->y, inertia->vy);
+            inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
+            inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
+            if (abs(inertia->vx) + abs(inertia->vy) < 1 ||
+                TIMER_DIFF_32(timer_read32(), inertia->coast_started_at) > KEYBALL_SCROLL_INERTIA_MAX_COAST_MS) {
+                inertia->vx       = 0;
+                inertia->vy       = 0;
+                inertia->coasting = false;
+            }
         }
     }
 #ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
