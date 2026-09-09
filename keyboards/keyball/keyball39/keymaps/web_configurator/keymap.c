@@ -16,18 +16,21 @@ extern uint8_t kb_aml_threshold;
 
 
 #ifdef GESTURE_ENABLE
-// ジェスチャー: ホールド中のトラックボール移動を累積し方向で判定して送出。
-// タップ（短押し）時は gesture_tap に設定した通常キーを送る兼用キー。
-static bool     g_gesture_active  = false;  // ジェスチャー発動中（確定）
-static bool     g_gesture_pending = false;  // 押下直後、タップ/ホールド未確定
-static bool     g_gesture_layer_on = false; // ジェスチャーレイヤーに滞在中
-static uint8_t  g_gesture_tap_kc  = 0;      // タップ時に送る基本キーコード（0=なし）
-static uint16_t g_gesture_timer   = 0;      // 押下時刻（ホールド判定用）
+// 複数ジェスチャーモード: トラックボールの移動を累積し方向で判定して送出する。
+// モードは4つ(0-3)あり、GST_HOLD〜4キーを押している間はそのモードを一時的に優先、
+// 離すと現在のレイヤーに連動するモード（なければ無効）に戻る。
+static int8_t   g_gst_manual_mode = -1;  // GST_HOLD〜4を押している間の一時モード。-1=なし
+static int8_t   g_gst_layer_mode  = -1;  // 現レイヤーに連動するモード。-1=連動なし
 static int16_t  g_gesture_acc_x   = 0;
 static int16_t  g_gesture_acc_y   = 0;
-static bool     g_gesture_cooldown = false;  // 発火直後は次の発火まで待つ（1スイング1回に制限）
+static bool     g_gesture_cooldown = false;  // 単発方向発火後、次の発火まで待つ（1スイング1回）
 static uint16_t g_gesture_cd_timer = 0;
 #define GST_COOLDOWN_MS 350  // クールダウン時間(ms)
+
+// 手動優先、なければレイヤー連動。どちらもなければ-1(ジェスチャー無効)
+static inline int8_t gst_active_mode(void) {
+    return g_gst_manual_mode >= 0 ? g_gst_manual_mode : g_gst_layer_mode;
+}
 #endif
 
 // clang-format off
@@ -78,32 +81,16 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 // マクロキー再生（QK_MACRO_0〜QK_MACRO_15 = 0x7700〜0x770F）
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 #ifdef GESTURE_ENABLE
-    if (keycode == GST_HOLD) {
+    if (keycode == GST_HOLD || keycode == GST_HOLD2 || keycode == GST_HOLD3 || keycode == GST_HOLD4) {
+        int8_t idx = (keycode == GST_HOLD) ? 0 : (keycode == GST_HOLD2) ? 1 : (keycode == GST_HOLD3) ? 2 : 3;
         if (record->event.pressed) {
-            uint8_t tk = kb_settings_get().gesture_tap;
-            g_gesture_acc_x = 0;
-            g_gesture_acc_y = 0;
-            g_gesture_cooldown = false;
-            if (tk == 0) {
-                // タップキー未設定 → 従来通りホールド専用
-                g_gesture_active  = true;
-                g_gesture_pending = false;
-            } else {
-                // タップ/ホールド兼用 → 判定を保留
-                g_gesture_tap_kc  = tk;
-                g_gesture_timer   = timer_read();
-                g_gesture_pending = true;
-                g_gesture_active  = false;
-            }
-        } else {
-            // 離した: 保留のまま（＝短押し）ならタップキーを送る
-            if (g_gesture_pending) tap_code(g_gesture_tap_kc);
-            g_gesture_active  = false;
-            g_gesture_pending = false;
-            g_gesture_acc_x   = 0;
-            g_gesture_acc_y   = 0;
-            g_gesture_cooldown = false;
+            g_gst_manual_mode = idx;
+        } else if (g_gst_manual_mode == idx) {
+            g_gst_manual_mode = -1;
         }
+        g_gesture_acc_x    = 0;
+        g_gesture_acc_y    = 0;
+        g_gesture_cooldown = false;
         return false;
     }
 #endif
@@ -201,8 +188,14 @@ layer_state_t layer_state_set_user(layer_state_t state) {
     keyball_set_scroll_mode(kb_scroll_layer_get() == hl);  // 設定レイヤーでスクロール（なし=0xFEは一致しない）
     keyball_set_precision_layer(kb_precision_layer_get() == hl);  // 設定レイヤーで超低速モード
 #ifdef GESTURE_ENABLE
-    g_gesture_layer_on = (kb_gesture_layer_get() == hl);   // 設定レイヤーでジェスチャー
-    if (!g_gesture_layer_on && !g_gesture_active && !g_gesture_pending) {
+    g_gst_layer_mode = -1;
+    for (uint8_t i = 0; i < KB_GESTURE_MODE_COUNT; i++) {
+        if (kb_gesture_mode_get(i).layer == hl) {
+            g_gst_layer_mode = i;
+            break;
+        }
+    }
+    if (gst_active_mode() < 0) {
         g_gesture_acc_x = 0;
         g_gesture_acc_y = 0;
         g_gesture_cooldown = false;
@@ -218,39 +211,15 @@ void matrix_scan_user(void) {
     keyball_seasonal_led_task();
 #endif
 
-#ifdef GESTURE_ENABLE
-    // ホールド判定: 兼用キーを押しっぱなしが Tapping Term を超えたらジェスチャー確定
-    if (g_gesture_pending) {
-        uint16_t tt = kb_settings_get().tapping_term;
-        if (tt < 50 || tt > 1000) tt = TAPPING_TERM;
-        if (timer_elapsed(g_gesture_timer) > tt) {
-            g_gesture_active  = true;
-            g_gesture_pending = false;
-        }
-    }
-#endif
 }
 
 // スクロール方向の反転（EEPROM設定に応じて符号を反転）
 report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
 #ifdef GESTURE_ENABLE
-    // 保留中（兼用キー押下直後）: 大きく振ったらジェスチャーと確定
-    if (g_gesture_pending) {
-        g_gesture_acc_x += mouse_report.x;
-        g_gesture_acc_y += mouse_report.y;
-        int16_t mx = g_gesture_acc_x < 0 ? -g_gesture_acc_x : g_gesture_acc_x;
-        int16_t my = g_gesture_acc_y < 0 ? -g_gesture_acc_y : g_gesture_acc_y;
-        if (mx > 12 || my > 12) {       // 明確に振った → ジェスチャー確定
-            g_gesture_active  = true;
-            g_gesture_pending = false;
-        }
-        mouse_report.x = 0;  // 判定中はカーソルを動かさない
-        mouse_report.y = 0;
-        return mouse_report;
-    }
-    if (g_gesture_active || g_gesture_layer_on) {
+    int8_t gst_mode = gst_active_mode();
+    if (gst_mode >= 0) {
         if (g_gesture_cooldown) {
-            // 発火直後のクールダウン中は溜め込まない（1スイングで連続発火しない）
+            // 単発方向発火直後のクールダウン中は溜め込まない（1スイングで連続発火しない）
             if (timer_elapsed(g_gesture_cd_timer) > GST_COOLDOWN_MS) {
                 g_gesture_cooldown = false;
             } else {
@@ -269,15 +238,27 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             g_gesture_acc_y > th_v || g_gesture_acc_y < -th_v) {
             int16_t ax = g_gesture_acc_x < 0 ? -g_gesture_acc_x : g_gesture_acc_x;
             int16_t ay = g_gesture_acc_y < 0 ? -g_gesture_acc_y : g_gesture_acc_y;
-            kb_settings_t gs = kb_settings_get();
-            uint16_t kc = (ax > ay)
-                ? (g_gesture_acc_x > 0 ? gs.gesture[3] : gs.gesture[2])   // 右 : 左
-                : (g_gesture_acc_y > 0 ? gs.gesture[1] : gs.gesture[0]);  // 下 : 上
+            bool    horizontal = ax > ay;
+            uint8_t dir = horizontal
+                ? (g_gesture_acc_x > 0 ? 3 : 2)   // 右:3 左:2
+                : (g_gesture_acc_y > 0 ? 1 : 0);  // 下:1 上:0
+
+            kb_gesture_mode_t m    = kb_gesture_mode_get(gst_mode);
+            uint16_t          kc   = m.key[dir];
+            bool              cont = (m.continuous >> dir) & 1;
             if (kc) tap_code16(kc);
-            g_gesture_acc_x = 0;
-            g_gesture_acc_y = 0;
-            g_gesture_cooldown = true;
-            g_gesture_cd_timer = timer_read();
+
+            if (cont) {
+                // 連続入力: しきい値分だけ引いて余りを持ち越す（クールダウンなし）。
+                // 速く回すほど短い間隔で再発火するので、回転速度に連動した連続入力になる。
+                if (horizontal) g_gesture_acc_x -= (g_gesture_acc_x > 0 ? th_h : -th_h);
+                else            g_gesture_acc_y -= (g_gesture_acc_y > 0 ? th_v : -th_v);
+            } else {
+                g_gesture_acc_x    = 0;
+                g_gesture_acc_y    = 0;
+                g_gesture_cooldown = true;
+                g_gesture_cd_timer = timer_read();
+            }
         }
         mouse_report.x = 0;  // ジェスチャー中はカーソルを動かさない
         mouse_report.y = 0;

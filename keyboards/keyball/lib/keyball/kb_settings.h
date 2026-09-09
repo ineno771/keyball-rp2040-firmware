@@ -44,8 +44,6 @@ typedef struct {
     uint8_t  aml_layer;      // 自動マウスレイヤーの対象レイヤー（0-7）
     uint16_t aml_timeout;    // 自動マウスレイヤーのタイムアウト(ms)
     uint8_t  aml_threshold;  // 自動マウスレイヤーの発動しきい値（移動量。小さいほど敏感）
-    uint8_t  gesture_tap;    // ジェスチャーキーをタップした時に送る基本キーコード（0=なし=長押し専用）
-    uint16_t gesture[4];     // ジェスチャー割り当て [0]上 [1]下 [2]左 [3]右（0=未設定→デフォルト）
 } __attribute__((packed)) kb_settings_t;
 
 #define KB_FLAG_AUTO_SHIFT       (1 << 0)
@@ -65,7 +63,9 @@ void kb_settings_set(const kb_settings_t *s);
 // ── トラックボール動作レイヤー（kb_settings構造体は満杯のため、マクロ領域の
 //    直後 0x09E0- に格納）──
 #define KB_SCROLL_LAYER_EEPROM   0x09E0  // スクロールレイヤー保存先
-#define KB_GESTURE_LAYER_EEPROM  0x09E1  // ジェスチャーレイヤー保存先
+// 0x09E1は旧・単一ジェスチャーレイヤー設定が使っていたが、複数ジェスチャーモード化
+// （2026-09-09）でモードごとのレイヤー(KB_GESTURE_MODE_TABLE_EEPROM内)に置き換わり
+// 未使用になった。他の設定と隣接させたくないため空き番地のまま残している。
 #define KB_GESTURE_TH_H_EEPROM  0x09E2  // ジェスチャー横方向しきい値保存先
 #define KB_GESTURE_TH_V_EEPROM  0x09E3  // ジェスチャー縦方向しきい値保存先
 #define KB_PRECISION_DIV_EEPROM   0x09E4  // 超低速モードの分周値保存先
@@ -77,12 +77,9 @@ uint8_t kb_scroll_layer_get(void);
 void    kb_scroll_layer_set(uint8_t v);
 
 #ifdef GESTURE_ENABLE
-// ジェスチャーレイヤー（0-7=そのレイヤーでジェスチャー / KB_LAYER_NONE=なし。既定なし）
-uint8_t kb_gesture_layer_get(void);
-void    kb_gesture_layer_set(uint8_t v);
-
 // ジェスチャー発動しきい値（移動量の累積。小さいほど敏感。既定50、範囲10-200）
 // 横方向(左右)・縦方向(上下)を別々に持つ。指の動かし方の癖に合わせて片方だけ調整できる。
+// 4モード共通（モードが変わるのは「動きの意味」であって「感度」ではないため）。
 #define KB_GESTURE_TH_DEFAULT 50
 #define KB_GESTURE_TH_MIN     10
 #define KB_GESTURE_TH_MAX     200
@@ -90,6 +87,29 @@ uint8_t kb_gesture_th_h_get(void);
 void    kb_gesture_th_h_set(uint8_t v);
 uint8_t kb_gesture_th_v_get(void);
 void    kb_gesture_th_v_set(uint8_t v);
+
+// ── 複数ジェスチャーモード（2026-09-09〜）─────────────────────────
+// 4つの独立したジェスチャーモードを持つ。各モードは上下左右の割当キーと、
+// 方向ごとの「連続入力」ON/OFF、連動レイヤー（0-7 / KB_LAYER_NONEでなし）を持つ。
+// モード選択はGST_HOLD〜4キー（押している間だけ優先）またはレイヤー連動で行う
+// （選択ロジック自体はkeymap.c側の責務。ここは設定の保存・取得のみ）。
+#define KB_GESTURE_MODE_COUNT 4
+
+typedef struct {
+    uint16_t key[4];     // 割当キー [0]上 [1]下 [2]左 [3]右（0=未設定）
+    uint8_t  continuous; // 方向ごとの連続入力ON/OFF（bit0=上,bit1=下,bit2=左,bit3=右）
+    uint8_t  layer;      // 連動レイヤー（0-7 / KB_LAYER_NONEでなし）
+} __attribute__((packed)) kb_gesture_mode_t;
+
+// レイヤー連動LEDテーブル(0x09E7-0x0A10)の直後、慣性スクロール設定(-0x0A18)の
+// さらに直後の空き領域。4モード×10バイト=40バイト（0x0A19-0x0A40）。
+// 次にここへ設定を追加する場合は0x0A41以降を使うこと。
+#define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
+#define KB_GESTURE_MODE_ENTRY_SIZE   10
+
+// モードN（0-3）の設定を取得・変更する
+kb_gesture_mode_t kb_gesture_mode_get(uint8_t mode);
+void              kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg);
 #endif
 
 // 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-5）

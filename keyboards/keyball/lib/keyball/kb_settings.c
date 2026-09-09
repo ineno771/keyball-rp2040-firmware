@@ -28,15 +28,6 @@ kb_settings_t kb_settings_get(void) {
         if (g_cache.aml_layer == 0 || g_cache.aml_layer > 7)         g_cache.aml_layer = 1;
         if (g_cache.aml_timeout < 100 || g_cache.aml_timeout > 5000) g_cache.aml_timeout = 650;
         if (g_cache.aml_threshold == 0 || g_cache.aml_threshold > 100) g_cache.aml_threshold = 10;
-        // ジェスチャー未初期化(0xFFFF or 0)ならデフォルト割り当てへ（旧FWからの移行も安全に）
-        if (g_cache.gesture[0] == 0xFFFF || g_cache.gesture[0] == 0) {
-            g_cache.gesture[0] = KB_GESTURE_DEFAULT_UP;
-            g_cache.gesture[1] = KB_GESTURE_DEFAULT_DOWN;
-            g_cache.gesture[2] = KB_GESTURE_DEFAULT_LEFT;
-            g_cache.gesture[3] = KB_GESTURE_DEFAULT_RIGHT;
-        }
-        // ジェスチャーのタップキーが未初期化(0xFF)なら「なし」に補正
-        if (g_cache.gesture_tap == 0xFF) g_cache.gesture_tap = 0;
         g_loaded = true;
     }
     return g_cache;
@@ -71,25 +62,6 @@ void kb_scroll_layer_set(uint8_t v) {
 }
 
 #ifdef GESTURE_ENABLE
-// ── ジェスチャーレイヤー（同上。未初期化/0xFE は「なし」）──────────────
-static uint8_t g_gesture_layer  = 0xEE;
-static bool    g_gesture_loaded = false;
-
-uint8_t kb_gesture_layer_get(void) {
-    if (!g_gesture_loaded) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_LAYER_EEPROM);
-        g_gesture_layer = (v <= 7) ? v : KB_LAYER_NONE;  // 0-7=レイヤー / それ以外=なし
-        g_gesture_loaded = true;
-    }
-    return g_gesture_layer;
-}
-
-void kb_gesture_layer_set(uint8_t v) {
-    g_gesture_layer  = (v <= 7) ? v : KB_LAYER_NONE;
-    g_gesture_loaded = true;
-    eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_LAYER_EEPROM, g_gesture_layer);
-}
-
 // ── ジェスチャーしきい値（横・縦、同上パターン）────────────────────────
 static uint8_t g_gesture_th_h        = 0xEE;
 static bool    g_gesture_th_h_loaded = false;
@@ -125,6 +97,69 @@ void kb_gesture_th_v_set(uint8_t v) {
     g_gesture_th_v = (v >= KB_GESTURE_TH_MIN && v <= KB_GESTURE_TH_MAX) ? v : KB_GESTURE_TH_DEFAULT;
     g_gesture_th_v_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_TH_V_EEPROM, g_gesture_th_v);
+}
+
+// ── 複数ジェスチャーモード（kb_layer_led_get/setと同様のテーブル読み書きだが、
+//    呼び出し頻度がトラックボール移動のたびと高いため、こちらはRAMキャッシュする）──
+static kb_gesture_mode_t g_gesture_modes[KB_GESTURE_MODE_COUNT];
+static bool              g_gesture_modes_loaded = false;
+
+static void kb_gesture_modes_ensure_loaded(void) {
+    if (g_gesture_modes_loaded) return;
+    for (uint8_t i = 0; i < KB_GESTURE_MODE_COUNT; i++) {
+        uint16_t addr = KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)i * KB_GESTURE_MODE_ENTRY_SIZE;
+        uint8_t  buf[KB_GESTURE_MODE_ENTRY_SIZE];
+        eeprom_read_block(buf, (const void *)(uintptr_t)addr, KB_GESTURE_MODE_ENTRY_SIZE);
+
+        kb_gesture_mode_t m;
+        m.key[0]     = ((uint16_t)buf[0] << 8) | buf[1];
+        m.key[1]     = ((uint16_t)buf[2] << 8) | buf[3];
+        m.key[2]     = ((uint16_t)buf[4] << 8) | buf[5];
+        m.key[3]     = ((uint16_t)buf[6] << 8) | buf[7];
+        m.continuous = buf[8];
+        m.layer      = buf[9];
+
+        // 未書き込みEEPROM(0xFFFF)ならモードごとの既定値へ補正
+        if (m.key[0] == 0xFFFF && m.key[1] == 0xFFFF && m.key[2] == 0xFFFF && m.key[3] == 0xFFFF) {
+            if (i == 0) {
+                // モード1のみ、旧単一ジェスチャーと同じデフォルト割り当てを引き継ぐ
+                m.key[0] = KB_GESTURE_DEFAULT_UP;
+                m.key[1] = KB_GESTURE_DEFAULT_DOWN;
+                m.key[2] = KB_GESTURE_DEFAULT_LEFT;
+                m.key[3] = KB_GESTURE_DEFAULT_RIGHT;
+            } else {
+                m.key[0] = m.key[1] = m.key[2] = m.key[3] = 0;  // 未設定
+            }
+            m.continuous = 0;
+            m.layer      = KB_LAYER_NONE;
+        } else if (m.layer > 7) {
+            m.layer = KB_LAYER_NONE;  // 範囲外は「なし」に補正
+        }
+        g_gesture_modes[i] = m;
+    }
+    g_gesture_modes_loaded = true;
+}
+
+kb_gesture_mode_t kb_gesture_mode_get(uint8_t mode) {
+    kb_gesture_modes_ensure_loaded();
+    if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;
+    return g_gesture_modes[mode];
+}
+
+void kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg) {
+    kb_gesture_modes_ensure_loaded();
+    if (mode >= KB_GESTURE_MODE_COUNT) return;
+    g_gesture_modes[mode] = *cfg;
+
+    uint8_t buf[KB_GESTURE_MODE_ENTRY_SIZE] = {
+        (uint8_t)(cfg->key[0] >> 8), (uint8_t)cfg->key[0],
+        (uint8_t)(cfg->key[1] >> 8), (uint8_t)cfg->key[1],
+        (uint8_t)(cfg->key[2] >> 8), (uint8_t)cfg->key[2],
+        (uint8_t)(cfg->key[3] >> 8), (uint8_t)cfg->key[3],
+        cfg->continuous, cfg->layer,
+    };
+    uint16_t addr = KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)mode * KB_GESTURE_MODE_ENTRY_SIZE;
+    eeprom_write_block(buf, (void *)(uintptr_t)addr, KB_GESTURE_MODE_ENTRY_SIZE);
 }
 #endif
 

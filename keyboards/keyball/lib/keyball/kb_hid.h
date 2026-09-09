@@ -26,8 +26,11 @@
 #define KB_HID_CMD_GET_MATRIX     0x12  // マトリクス状態取得: 各行のビットマスクを返す
 #define KB_HID_CMD_GET_MACRO      0x13  // マクロ取得: [cmd,slot] → [cmd,slot,count,kc×6,status]
 #define KB_HID_CMD_SET_MACRO      0x14  // マクロ設定: [cmd,slot,count,kc×6] → [cmd,status]
-#define KB_HID_CMD_GET_GESTURE    0x15  // ジェスチャー設定取得（GESTURE_ENABLE時のみ応答）
-#define KB_HID_CMD_SET_GESTURE    0x16  // ジェスチャー設定変更（GESTURE_ENABLE時のみ応答）
+// 0x15/0x16は複数ジェスチャーモード化（2026-09-09）に伴い廃止（欠番）。
+// 旧・単一ジェスチャー（gesture_tap・単一レイヤー）に依存していたため、新しい
+// kb_gesture_mode_tの構造とは互換性がない。後継はGET/SET_GESTURE_MODE(0x20/0x21)
+// とGET/SET_GESTURE_THRESHOLD(0x22/0x23)。AVR版（keyball-link/plus-firmware）は
+// 引き続き0x15/0x16で旧仕様のまま応答するため、この欠番はRP2040版限定。
 #define KB_HID_CMD_GET_VERSION    0x17  // ファームウェアのバージョン取得（major.minor.patch）
 #define KB_HID_CMD_GET_PRECISION  0x18  // 超低速モードのCPI分周値取得
 #define KB_HID_CMD_SET_PRECISION  0x19  // 超低速モードのCPI分周値変更
@@ -37,6 +40,10 @@
 #define KB_HID_CMD_SET_LAYER_LED        0x1D  // 指定レイヤーのLED設定変更
 #define KB_HID_CMD_GET_SCROLL_INERTIA   0x1E  // 慣性スクロール設定取得
 #define KB_HID_CMD_SET_SCROLL_INERTIA   0x1F  // 慣性スクロール設定変更
+#define KB_HID_CMD_GET_GESTURE_MODE      0x20  // 指定ジェスチャーモード(0-3)の設定取得
+#define KB_HID_CMD_SET_GESTURE_MODE      0x21  // 指定ジェスチャーモード(0-3)の設定変更
+#define KB_HID_CMD_GET_GESTURE_THRESHOLD 0x22  // ジェスチャー発動しきい値（全モード共通）取得
+#define KB_HID_CMD_SET_GESTURE_THRESHOLD 0x23  // ジェスチャー発動しきい値（全モード共通）変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00

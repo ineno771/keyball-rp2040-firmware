@@ -122,8 +122,13 @@ enum keyball_keycodes {
     AML_I50  = QK_KB_11, // Increment automatic mouse layer timeout
     AML_D50  = QK_KB_12, // Decrement automatic mouse layer timeout
 
-    // ジェスチャー: 押している間トラックボールを上下左右に振るとキー送出
-    GST_HOLD = QK_KB_16,
+    // ジェスチャー: 押している間トラックボールを上下左右に振るとキー送出。
+    // GST_HOLD〜4はジェスチャーモード1〜4の手動切替キー（押している間だけ
+    // レイヤー連動より優先。各モードの中身はKeyball Linkのジェスチャー設定で変更）
+    GST_HOLD  = QK_KB_16,
+    GST_HOLD2 = QK_KB_19,
+    GST_HOLD3 = QK_KB_20,
+    GST_HOLD4 = QK_KB_21,
 
     // 超低速（精密作業）モード: 押している間だけCPIを下げる
     PRC_MO   = QK_KB_17,
