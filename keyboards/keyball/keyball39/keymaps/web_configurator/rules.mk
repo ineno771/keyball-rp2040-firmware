@@ -23,6 +23,11 @@ RGBLIGHT_ENABLE = no
 EXTRAKEY_ENABLE = yes
 OPT_DEFS += -DGESTURE_ENABLE
 
+# 2026-09-09、複数ジェスチャーモード化後に発生した不具合（スクロールレイヤーの
+# 誤検知等）の原因調査のため一時的に有効化。原因特定後は必ずno（board側の既定値）
+# に戻すこと。
+CONSOLE_ENABLE = yes
+
 # タップダンス（フラッシュ節約のため無効化）
 # TAP_DANCE_ENABLE = yes
 

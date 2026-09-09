@@ -40,16 +40,39 @@ void kb_settings_set(const kb_settings_t *s) {
         sizeof(kb_settings_t));
 }
 
+// KB_TRACKBALL_LAYERS_MAGIC_EEPROM参照。スクロール/超低速レイヤーが一度でも実際に
+// 保存されたかどうかの目印。目印が無い間は生バイトを信用せず既定値を返す
+// （0x00で未初期化されるRP2040のEEPROMでは、生バイトの0とレイヤー0を区別できないため）。
+static int8_t g_trackball_layers_configured = -1;  // -1=未確認 0=未保存 1=保存済み
+
+static bool trackball_layers_configured(void) {
+    if (g_trackball_layers_configured < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_TRACKBALL_LAYERS_MAGIC_EEPROM);
+        g_trackball_layers_configured = (v == KB_TRACKBALL_LAYERS_MAGIC_VALUE) ? 1 : 0;
+    }
+    return g_trackball_layers_configured == 1;
+}
+
+static void trackball_layers_mark_configured(void) {
+    if (g_trackball_layers_configured == 1) return;
+    g_trackball_layers_configured = 1;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_TRACKBALL_LAYERS_MAGIC_EEPROM, KB_TRACKBALL_LAYERS_MAGIC_VALUE);
+}
+
 // ── スクロールレイヤー（構造体外・EEPROM末尾に1バイト保存）────────────
 static uint8_t g_scroll_layer  = 0xEE;
 static bool    g_scroll_loaded = false;
 
 uint8_t kb_scroll_layer_get(void) {
     if (!g_scroll_loaded) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_LAYER_EEPROM);
-        if (v <= 7)                  g_scroll_layer = v;             // 0-7 = そのレイヤー
-        else if (v == KB_LAYER_NONE) g_scroll_layer = KB_LAYER_NONE; // 明示的に「なし」
-        else                         g_scroll_layer = 3;            // 0xFF未初期化 → 既定レイヤー3
+        if (!trackball_layers_configured()) {
+            g_scroll_layer = 3;  // 一度も保存されたことがない → 既定レイヤー3
+        } else {
+            uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_LAYER_EEPROM);
+            if (v <= 7)                  g_scroll_layer = v;             // 0-7 = そのレイヤー
+            else if (v == KB_LAYER_NONE) g_scroll_layer = KB_LAYER_NONE; // 明示的に「なし」
+            else                         g_scroll_layer = 3;            // 想定外の値 → 既定レイヤー3
+        }
         g_scroll_loaded = true;
     }
     return g_scroll_layer;
@@ -59,6 +82,7 @@ void kb_scroll_layer_set(uint8_t v) {
     g_scroll_layer  = (v <= 7) ? v : KB_LAYER_NONE;
     g_scroll_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_LAYER_EEPROM, g_scroll_layer);
+    trackball_layers_mark_configured();
 }
 
 #ifdef GESTURE_ENABLE
@@ -119,8 +143,13 @@ static void kb_gesture_modes_ensure_loaded(void) {
         m.continuous = buf[8];
         m.layer      = buf[9];
 
-        // 未書き込みEEPROM(0xFFFF)ならモードごとの既定値へ補正
-        if (m.key[0] == 0xFFFF && m.key[1] == 0xFFFF && m.key[2] == 0xFFFF && m.key[3] == 0xFFFF) {
+        // 未書き込みEEPROMならモードごとの既定値へ補正。RP2040のEEPROM(wear leveling方式)は
+        // 未書き込み領域が0xFFではなく0x00で初期化されるため、両方を「未設定」とみなす
+        // （2026-09-09発覚: 0x00を無視すると生バイトのlayer==0が「レイヤー0に連動」と
+        // 誤認識され、一度もWeb UIで保存していないモードがレイヤー0で暴発する事故になる）。
+        bool all_ff   = m.key[0] == 0xFFFF && m.key[1] == 0xFFFF && m.key[2] == 0xFFFF && m.key[3] == 0xFFFF;
+        bool all_zero = m.key[0] == 0 && m.key[1] == 0 && m.key[2] == 0 && m.key[3] == 0 && m.continuous == 0 && m.layer == 0;
+        if (all_ff || all_zero) {
             if (i == 0) {
                 // モード1のみ、旧単一ジェスチャーと同じデフォルト割り当てを引き継ぐ
                 m.key[0] = KB_GESTURE_DEFAULT_UP;
@@ -188,8 +217,12 @@ static bool    g_precision_layer_loaded = false;
 
 uint8_t kb_precision_layer_get(void) {
     if (!g_precision_layer_loaded) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_PRECISION_LAYER_EEPROM);
-        g_precision_layer = (v <= 7) ? v : KB_LAYER_NONE;  // 0-7=レイヤー / それ以外=なし
+        if (!trackball_layers_configured()) {
+            g_precision_layer = KB_LAYER_NONE;  // 一度も保存されたことがない → 既定は「なし」
+        } else {
+            uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_PRECISION_LAYER_EEPROM);
+            g_precision_layer = (v <= 7) ? v : KB_LAYER_NONE;  // 0-7=レイヤー / それ以外=なし
+        }
         g_precision_layer_loaded = true;
     }
     return g_precision_layer;
@@ -199,6 +232,7 @@ void kb_precision_layer_set(uint8_t v) {
     g_precision_layer        = (v <= 7) ? v : KB_LAYER_NONE;
     g_precision_layer_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_PRECISION_LAYER_EEPROM, g_precision_layer);
+    trackball_layers_mark_configured();
 }
 
 // ── レイヤー連動LED有効フラグ（同上パターン）────────────────────────

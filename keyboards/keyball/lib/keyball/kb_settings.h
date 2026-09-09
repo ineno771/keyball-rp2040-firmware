@@ -72,6 +72,17 @@ void kb_settings_set(const kb_settings_t *s);
 #define KB_PRECISION_LAYER_EEPROM 0x09E5  // 超低速モードの連動レイヤー保存先
 #define KB_LAYER_NONE            0xFE    // 「なし」を表す値（0xFF=未初期化と区別）
 
+// 2026-09-09発覚: RP2040のEEPROM(wear leveling方式)は、一度も書き込んだことのない
+// 領域が0xFFではなく0x00で初期化される。KB_SCROLL_LAYER_EEPROM/KB_PRECISION_LAYER_EEPROM
+// は「生バイト0-7=そのままレイヤー番号」という設計のため、未書き込みの0x00が
+// 「レイヤー0」と区別できず、一度もWeb UIで保存したことがない設定が常にレイヤー0に
+// 連動してしまう事故が起きた（レイヤー0でトラックボールが握りつぶされ動かなくなる）。
+// レイヤー0自体は精密モードなどで有効な選択肢のため、生バイトの意味を変える対応
+// （0オフセットなど）は避け、代わりに「一度でも実際に保存されたか」を示す目印を
+// 別バイトに持たせ、目印が無い間は生バイトを信用せず既定値を返すようにした。
+#define KB_TRACKBALL_LAYERS_MAGIC_EEPROM 0x0A41  // スクロール/超低速レイヤーが実際に保存済みかの目印(1バイト)
+#define KB_TRACKBALL_LAYERS_MAGIC_VALUE  0x7A
+
 // スクロールレイヤー（0-7=そのレイヤーでスクロール / KB_LAYER_NONE=無効。既定3）
 uint8_t kb_scroll_layer_get(void);
 void    kb_scroll_layer_set(uint8_t v);
@@ -103,7 +114,8 @@ typedef struct {
 
 // レイヤー連動LEDテーブル(0x09E7-0x0A10)の直後、慣性スクロール設定(-0x0A18)の
 // さらに直後の空き領域。4モード×10バイト=40バイト（0x0A19-0x0A40）。
-// 次にここへ設定を追加する場合は0x0A41以降を使うこと。
+// 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROMで使用済み。次にここへ設定を
+// 追加する場合は0x0A42以降を使うこと。
 #define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
 #define KB_GESTURE_MODE_ENTRY_SIZE   10
 

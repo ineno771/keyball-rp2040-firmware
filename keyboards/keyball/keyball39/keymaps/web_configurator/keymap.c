@@ -6,6 +6,9 @@
 #include "lib/keyball/kb_hid.h"
 #include "lib/keyball/td_config.h"
 #include "lib/keyball/kb_settings.h"
+#ifdef CONSOLE_ENABLE
+#include "eeprom.h"
+#endif
 #ifndef LED_VERSION_BUILD
 #include "lib/keyball/kb_macro.h"
 #endif
@@ -149,6 +152,12 @@ void keyball_on_apply_motion_to_mouse_move(keyball_motion_t *m, report_mouse_t *
 }
 
 void keyboard_post_init_user(void) {
+#ifdef CONSOLE_ENABLE
+    // 2026-09-09、原因調査用の一時的なデバッグ出力（qmk consoleで確認）。
+    debug_enable = true;
+    uint8_t raw_scroll_layer = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SCROLL_LAYER_EEPROM);
+    dprintf("kb_debug: boot raw_scroll_layer_byte=%u kb_scroll_layer_get=%u\n", raw_scroll_layer, kb_scroll_layer_get());
+#endif
     kb_settings_t s = kb_settings_get();
 #ifdef AUTO_SHIFT_ENABLE
     if (s.flags & KB_FLAG_AUTO_SHIFT) autoshift_enable();
@@ -200,6 +209,10 @@ layer_state_t layer_state_set_user(layer_state_t state) {
         g_gesture_acc_y = 0;
         g_gesture_cooldown = false;
     }
+#ifdef CONSOLE_ENABLE
+    dprintf("kb_debug: layer_state_set hl=%u scroll_layer=%u scroll_mode=%u gst_layer_mode=%d gst_manual_mode=%d active_mode=%d\n",
+            hl, kb_scroll_layer_get(), keyball_get_scroll_mode(), g_gst_layer_mode, g_gst_manual_mode, gst_active_mode());
+#endif
 #endif
     return state;
 }
@@ -217,6 +230,16 @@ void matrix_scan_user(void) {
 report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
 #ifdef GESTURE_ENABLE
     int8_t gst_mode = gst_active_mode();
+#ifdef CONSOLE_ENABLE
+    if (mouse_report.x || mouse_report.y || mouse_report.h || mouse_report.v) {
+        static uint16_t dbg_timer = 0;
+        if (timer_elapsed(dbg_timer) > 300) {
+            dbg_timer = timer_read();
+            dprintf("kb_debug: motion x=%d y=%d h=%d v=%d gst_mode=%d scroll_mode=%u\n",
+                    mouse_report.x, mouse_report.y, mouse_report.h, mouse_report.v, gst_mode, keyball_get_scroll_mode());
+        }
+    }
+#endif
     if (gst_mode >= 0) {
         if (g_gesture_cooldown) {
             // 単発方向発火直後のクールダウン中は溜め込まない（1スイングで連続発火しない）
