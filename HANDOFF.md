@@ -57,6 +57,7 @@
 - **汎用連続値調整機能構想（アイデア段階、未着手）**: 対応キーを押しながらボールを回転させると、その回転量に応じて割り当てられたキーが連続送信される汎用機能。当初「音量調整」「輝度調整」「イラレ等のフォントサイズ調整」と個別に挙がっていたアイデアを、**1つの汎用機能（割当先キーを変更可能）として統合**（本人了承済み）。割当先はKeyball Linkから設定変更できるようにしたい。矢印キーモード（速度連動連続入力）と同じ仕組みを流用できる見込み。
 - **スクロール慣性（モメンタムスクロール）構想（アイデア段階、未着手）**: トラックボールでのスクロール操作に、指を離した後も減速しながら続く慣性を付ける。**慣性の強さをKeyball Linkから調整できるようにしたい**（本人希望）。Keyball Link側の対応も必要になる。
 - **レイヤー数の増加（実装済み・2026-09-02）**: `DYNAMIC_KEYMAP_LAYER_COUNT`を4→8に変更（`keyball39/keymaps/web_configurator/config.h`）。ビルド確認済み、実機での動作確認はこれから。Keyball Link側はGET_INFOで実際のレイヤー数を都度取得する設計のため、Web側のコード変更は不要（自動対応）。上記「ジェスチャーによるレイヤー切替」は4方向のみ対応のため、8レイヤー全てにジェスチャーで到達できるわけではない点に注意（残りは既存のレイヤーキー等でアクセスする想定）。
+- **複数ジェスチャーモード（実装済み・実機確認済み・2026-09-09）**: 従来1系統だったジェスチャーを4つの独立したモードに拡張。各モードは上下左右に別々のキーを割り当てられ、方向ごとに「連続入力」（回転速度に応じてキーを連続タップ。音量調整・フォントサイズ変更向け）をON/OFFできる。モード選択はレイヤー連動（モードごとに対象レイヤー1つ、`kb_gesture_mode_t.layer`）＋手動キー（`GST_HOLD`=モード1、`GST_HOLD2`〜`4`=モード2〜4、押している間だけ優先しレイヤー連動より一時的に上位）。旧・単一モードの「タップで別キーを送る」機能(`gesture_tap`)は廃止（ホールド専用に統一）。AVR版（keyball-link/plus-firmware）は無変更・影響なし。詳細設計は`kb_settings.h`の`kb_gesture_mode_t`、`kb_hid.h`の`KB_HID_CMD_GET/SET_GESTURE_MODE`(0x20/0x21)・`GET/SET_GESTURE_THRESHOLD`(0x22/0x23)、`keymap.c`の`gst_active_mode()`まわりを参照。Keyball Link側UIも実装・実機確認済み（`rp2040-dev`ブランチ）。
 
 ---
 
@@ -114,6 +115,8 @@
   rm -f ~/qmk_firmware/keyball_keyball39_web_configurator.uf2
   cd ~/qmk_firmware && qmk compile -kb keyball/keyball39 -km web_configurator
   ```
+- **重要（2026-09-09判明）**: RP2040のEEPROMエミュレーション（wear leveling方式）は、**一度も書き込んだことのない論理アドレスが`0xFF`ではなく`0x00`で初期化される**（`quantum/wear_leveling/wear_leveling.c`が原因）。AVR版や世間一般のEEPROM実装は`0xFF`が未初期化の目印という前提が広く通用するが、RP2040ではこれが成立しない。「生バイト0-7=そのままレイヤー番号」のような設定を新規に追加する際、未書込み時の`0x00`を「値0を明示的に選んだ」と区別できず誤動作する（実例: 複数ジェスチャーモード機能で、一度もWeb UIで保存していないモードがレイヤー0に誤連動しトラックボールが握りつぶされる事故になった。`kb_settings.c`の`trackball_layers_configured()`のように「実際に保存されたことがあるか」を示す目印バイトを別に持たせて対処）。新しいEEPROM設定を追加するときは必ずこれを考慮すること。
+- **デバッグ手法**: `web_configurator`キーマップの`rules.mk`で`CONSOLE_ENABLE = yes`にし、`keyboard_post_init_user`で`debug_enable = true`をセットすると、要所の`dprintf`がホストPC側の`qmk console`コマンドで確認できる（RAW HID通信とは別チャンネルなので競合しない）。2026-09-09時点で常時有効のまま運用中。
 
 ## 7. ハードウェア識別情報
 - USB VID `0x5957`（Yowkees共通）・PID `0x0600`（keyball-rp2040-firmware Keyball39専用、新規発行）
