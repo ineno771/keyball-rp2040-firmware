@@ -114,14 +114,43 @@ typedef struct {
 
 // レイヤー連動LEDテーブル(0x09E7-0x0A10)の直後、慣性スクロール設定(-0x0A18)の
 // さらに直後の空き領域。4モード×10バイト=40バイト（0x0A19-0x0A40）。
-// 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROMで使用済み。次にここへ設定を
-// 追加する場合は0x0A42以降を使うこと。
+// 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROM、0x0A42はKB_GESTURE_WAVE_SPEED_EEPROM、
+// 0x0A43はKB_GESTURE_WAVE_ENABLE_EEPROMで使用済み。次にここへ設定を追加する場合は
+// 0x0A44以降を使うこと。
 #define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
 #define KB_GESTURE_MODE_ENTRY_SIZE   10
 
 // モードN（0-3）の設定を取得・変更する
 kb_gesture_mode_t kb_gesture_mode_get(uint8_t mode);
 void              kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg);
+
+// ── ジェスチャー連動LEDウェーブの速さ（2026-09-09〜）─────────────────
+// ウェーブが端から端まで流れきる速さ（大きいほど速い＝すぐ消える）。通常LED・
+// レイヤー連動LEDのどちらの速度設定とも独立している（ウェーブは選択式のエフェクト
+// ではなく、ジェスチャー発火時に現在の光り方を一時的に上書きする演出のため、
+// 速度だけ専用の設定を持つ）。
+// 下限を0ではなく1にしているのは、RP2040のEEPROM(wear leveling方式)が未書き込み
+// 領域を0x00で初期化するため（kb_settings.h冒頭のKB_TRACKBALL_LAYERS_MAGIC_EEPROM
+// 参照）。0を有効値に含めると未設定と区別できなくなるので、他のしきい値設定
+// （KB_GESTURE_TH_*等）と同じく「範囲外なら既定値」方式で回避する。
+// KB_GESTURE_MODE_TABLE_EEPROM(0x0A19-0x0A40)・KB_TRACKBALL_LAYERS_MAGIC_EEPROM(0x0A41)
+// の直後の空き番地（コメント参照）。
+#define KB_GESTURE_WAVE_SPEED_EEPROM  0x0A42
+#define KB_GESTURE_WAVE_SPEED_MIN     1
+#define KB_GESTURE_WAVE_SPEED_MAX     255
+#define KB_GESTURE_WAVE_SPEED_DEFAULT 200
+uint8_t kb_gesture_wave_speed_get(void);
+void    kb_gesture_wave_speed_set(uint8_t v);
+
+// ジェスチャー連動LEDウェーブ機能そのものの有効/無効（既定: 有効）。他の有効/無効
+// フラグ（kb_layer_led_enable等）と違い既定がONなので、判定を反転させている：
+// RP2040のEEPROM(wear leveling方式)は未書き込み領域が0x00になるため、通常の
+// 「1だけが有効」方式のままだと未設定時に既定でOFFになってしまう。代わりに
+// 「1という値だけが明示的なOFF、それ以外(未書込みの0x00含む)は既定のON」とする
+// ことで、未設定時にちゃんと既定ONになるようにしている。
+#define KB_GESTURE_WAVE_ENABLE_EEPROM 0x0A43
+bool kb_gesture_wave_enable_get(void);
+void kb_gesture_wave_enable_set(bool v);
 #endif
 
 // 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-5）

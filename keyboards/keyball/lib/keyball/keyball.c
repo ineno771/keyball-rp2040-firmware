@@ -494,6 +494,76 @@ report_mouse_t pointing_device_driver_get_report(report_mouse_t rep) {
     return rep;
 }
 
+#ifdef GESTURE_ENABLE
+//////////////////////////////////////////////////////////////////////////////
+// Gesture-linked LED wave (see keyball.h for keyball_gesture_wave_trigger)
+
+// RIPPLE(rgb_matrix_user.inc)と同じ「空きスロット優先・無ければ最古を上書き」方式。
+// マスター・スレーブ双方でローカルに呼ばれ、それぞれのkeyball.gesture_wave_*を更新する。
+static void gesture_wave_record_local(uint8_t direction) {
+    uint8_t slot = KEYBALL_GESTURE_WAVE_SLOT_COUNT;
+    for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+        if (!keyball.gesture_wave_active[s]) {
+            slot = s;
+            break;
+        }
+    }
+    if (slot == KEYBALL_GESTURE_WAVE_SLOT_COUNT) {
+        uint16_t oldest = 0;
+        for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+            uint16_t e = timer_elapsed(keyball.gesture_wave_start[s]);
+            if (e >= oldest) {
+                oldest = e;
+                slot   = s;
+            }
+        }
+    }
+    keyball.gesture_wave_start[slot]  = timer_read();
+    keyball.gesture_wave_dir[slot]    = direction;
+    keyball.gesture_wave_active[slot] = true;
+}
+
+// direction・speedをまとめてRPCで送るための型。speedを一緒に運ぶ理由は
+// keyball_gesture_wave_trigger直前のコメント参照。
+typedef struct {
+    uint8_t direction;
+    uint8_t speed;
+} gesture_wave_rpc_t;
+
+#ifdef SPLIT_KEYBOARD
+// 反対側のハーフにも同じ瞬間にウェーブを表示させるための送信待ちフラグ。
+// housekeeping_task_kbから毎スキャン呼ばれるrpc_gesture_wave_invoke(下記)が実際の
+// 送信を担当する。keyball_gesture_wave_trigger自体はマスター側のジェスチャー
+// エンジン(keymap.c)からしか呼ばれない想定。
+static bool               g_gesture_wave_pending = false;
+static gesture_wave_rpc_t g_gesture_wave_pending_payload;
+#endif
+
+void keyball_gesture_wave_trigger(uint8_t direction) {
+    if (!kb_gesture_wave_enable_get()) return;  // 機能自体がOFFなら何もしない
+
+    // 連続入力などで短時間に何度も呼ばれても、前のウェーブがまだ表示中なら次を
+    // 発動させない（本人希望：重ねて発動させず、前のウェーブが終わってから次を
+    // 出したい）。ここでの判定はマスター自身のローカルなgesture_wave_active[]で
+    // 行う（スレーブへは実際に発動を決めた時だけRPCで伝えるので、スレーブ側が
+    // 勝手に多重発動することもない）。
+    for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+        if (keyball.gesture_wave_active[s]) return;
+    }
+
+    // ウェーブの速さは各ハーフが自分のEEPROMから読むと分割両ハーフで値がずれる
+    // （kb_settings.hのKB_GESTURE_WAVE_SPEED_EEPROM参照）。呼び出し元はマスターの
+    // ジェスチャーエンジンのみなので、ここで読む値は常にWeb UIが実際に書き込んだ側
+    // （＝マスター）の値であり、これを両ハーフ共通の「正」としてRPCで配る。
+    keyball.gesture_wave_speed = kb_gesture_wave_speed_get();
+    gesture_wave_record_local(direction);
+#ifdef SPLIT_KEYBOARD
+    g_gesture_wave_pending         = true;
+    g_gesture_wave_pending_payload = (gesture_wave_rpc_t){.direction = direction, .speed = keyball.gesture_wave_speed};
+#endif
+}
+#endif
+
 //////////////////////////////////////////////////////////////////////////////
 // Split RPC
 
@@ -582,6 +652,25 @@ static void rpc_set_cpi_invoke(void) {
     }
     keyball.cpi_changed = false;
 }
+
+#ifdef GESTURE_ENABLE
+static void rpc_gesture_wave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    const gesture_wave_rpc_t *req = (const gesture_wave_rpc_t *)in_data;
+    keyball.gesture_wave_speed    = req->speed;
+    gesture_wave_record_local(req->direction);
+}
+
+static void rpc_gesture_wave_invoke(void) {
+    if (!g_gesture_wave_pending) {
+        return;
+    }
+    gesture_wave_rpc_t req = g_gesture_wave_pending_payload;
+    if (!transaction_rpc_send(KEYBALL_GESTURE_WAVE, sizeof(req), &req)) {
+        return;
+    }
+    g_gesture_wave_pending = false;
+}
+#endif
 
 #endif
 
@@ -820,7 +909,12 @@ void keyball_apply_normal_led(void) {
 #endif
 }
 
-void keyball_apply_layer_led(uint8_t hl) {
+// 実際にレイヤー連動LED/通常LEDのどちらを表示すべきか判定して即座に反映する（既に
+// その状態である場合の冗長な書き込みスキップは行わない）。keyball_apply_layer_led本体
+// （冗長スキップあり）と、ジェスチャーウェーブのオーバーライド終了時（現在の表示が
+// ウェーブになっている＝どちらの状態であってもとにかく強制的に書き戻す必要がある）
+// の両方から使う共通処理。
+static void apply_layer_led_now(uint8_t hl) {
     bool           layer_led_on = kb_layer_led_enable_get();
     kb_layer_led_t layer_led    = layer_led_on ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
 
@@ -835,11 +929,48 @@ void keyball_apply_layer_led(uint8_t hl) {
         rgblight_sethsv_noeeprom(layer_led.hue, layer_led.sat, layer_led.val);
         rgblight_set_speed_noeeprom(layer_led.speed);
 #endif
-    } else if (g_layer_led_overriding) {
+    } else {
         g_layer_led_overriding = false;
         keyball_apply_normal_led();
     }
 }
+
+void keyball_apply_layer_led(uint8_t hl) {
+    bool           layer_led_on = kb_layer_led_enable_get();
+    kb_layer_led_t layer_led    = layer_led_on ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
+
+    if ((layer_led_on && layer_led.enabled) || g_layer_led_overriding) {
+        apply_layer_led_now(hl);
+    }
+}
+
+#if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)
+// ジェスチャーウェーブが今まさに発火中かどうかを見て、RGB_MATRIXモードを強制的に
+// GESTURE_WAVEへ上書き/復帰する。通常LED・レイヤー連動LEDのどちらの設定が選ばれて
+// いても関係なく、ジェスチャー発火の瞬間だけ最優先でウェーブを表示するための仕組み
+// （詳細はkeyball.hのコメント参照）。housekeeping_task_kbから両ハーフで毎スキャン
+// 呼ばれる。
+static bool g_gesture_wave_overriding = false;
+
+void keyball_gesture_wave_task(void) {
+    bool active = false;
+    for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+        if (keyball.gesture_wave_active[s]) {
+            active = true;
+            break;
+        }
+    }
+
+    if (active && !g_gesture_wave_overriding) {
+        g_gesture_wave_overriding = true;
+        rgb_matrix_enable_noeeprom();  // 通常LEDがオフ設定でもウェーブだけは見えるようにする
+        rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_GESTURE_WAVE);
+    } else if (!active && g_gesture_wave_overriding) {
+        g_gesture_wave_overriding = false;
+        apply_layer_led_now(get_highest_layer(layer_state));
+    }
+}
+#endif
 
 #ifdef RGBLIGHT_ENABLE
 // 季節限定LEDエフェクト（RGBLIGHT版のみ）: 単色モードの色を毎フレーム少しずつ変えることで
@@ -984,6 +1115,9 @@ void keyboard_post_init_kb(void) {
         transaction_register_rpc(KEYBALL_GET_INFO, rpc_get_info_handler);
         transaction_register_rpc(KEYBALL_GET_MOTION, rpc_get_motion_handler);
         transaction_register_rpc(KEYBALL_SET_CPI, rpc_set_cpi_handler);
+#ifdef GESTURE_ENABLE
+        transaction_register_rpc(KEYBALL_GESTURE_WAVE, rpc_gesture_wave_handler);
+#endif
     }
 #endif
 
@@ -1031,7 +1165,15 @@ void housekeeping_task_kb(void) {
             rpc_get_motion_invoke();
             rpc_set_cpi_invoke();
         }
+#ifdef GESTURE_ENABLE
+        rpc_gesture_wave_invoke();
+#endif
     }
+    // ウェーブのオーバーライド判定は両ハーフが自分のLED表示について独立に決めるため、
+    // is_keyboard_master()の外（両ハーフで毎回実行）に置く。
+#if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)
+    keyball_gesture_wave_task();
+#endif
 }
 #endif
 

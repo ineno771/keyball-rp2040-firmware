@@ -206,6 +206,26 @@ typedef struct {
 
     // Buffer to indicate pressing keys.
     char pressing_keys[KEYBALL_OLED_MAX_PRESSING_KEYCODES + 1];
+
+#ifdef GESTURE_ENABLE
+    // ジェスチャー連動LEDウェーブ用のトリガー記録（RIPPLEと同じ固定スロット方式）。
+    // 両ハーフで同時に光らせるため、マスター側はkeyball_gesture_wave_trigger()で
+    // ローカルに記録すると同時に一方向RPC(KEYBALL_GESTURE_WAVE)でスレーブにも伝える。
+    // rgb_matrix_user.incのGESTURE_WAVEエフェクトが読み取り専用で参照する。
+#define KEYBALL_GESTURE_WAVE_SLOT_COUNT 6
+    uint16_t gesture_wave_start[KEYBALL_GESTURE_WAVE_SLOT_COUNT];
+    uint8_t  gesture_wave_dir[KEYBALL_GESTURE_WAVE_SLOT_COUNT];  // 0=上 1=下 2=左 3=右
+    bool     gesture_wave_active[KEYBALL_GESTURE_WAVE_SLOT_COUNT];
+    // ウェーブの速さ（kb_gesture_wave_speed_getと同じ0-255）。2026-09-09発覚:
+    // 分割両ハーフはそれぞれ自分のEEPROMを持っており、Web UIのSET系コマンドは
+    // USB接続中の片方（＝マスター）にしか届かないため、kb_gesture_wave_speed_get()を
+    // スレーブ側でそのまま呼ぶとマスターと異なる（未設定/古い）値を読んでしまい、
+    // ウェーブの速さが片方のハーフだけ違って見える不具合になっていた。そのため
+    // 発火のたびにマスターが読んだ実際の値をこのフィールドへ書き込み、
+    // KEYBALL_GESTURE_WAVE RPCの一部としてスレーブにも配って共有する
+    // （rgb_matrix_user.incはkb_gesture_wave_speed_get()を直接呼ばず、これを読む）。
+    uint8_t gesture_wave_speed;
+#endif
 } keyball_t;
 
 typedef enum {
@@ -270,6 +290,27 @@ void keyball_set_precision_key(bool pressed);
 /// currently the highest active layer. See keyball_set_precision_key for how the two sources
 /// combine.
 void keyball_set_precision_layer(bool on);
+
+#ifdef GESTURE_ENABLE
+/// keyball_gesture_wave_trigger records a gesture-fire event (direction: 0=up,1=down,2=left,
+/// 3=right, matching keymap.c's gesture direction encoding) for the GESTURE_WAVE LED effect,
+/// and — when called on the master — also forwards it to the slave half via a one-way split
+/// transaction so both halves animate together. Call only when a real key was actually sent
+/// by the gesture (kc != 0); an unassigned direction shouldn't trigger the effect.
+void keyball_gesture_wave_trigger(uint8_t direction);
+
+#ifdef RGB_MATRIX_ENABLE
+// gesture_wave_active[]のいずれかが発火中かどうかを見て、現在のRGB_MATRIXモードを
+// 強制的にGESTURE_WAVEへ上書き/復帰する。通常LED・レイヤー連動LEDのどちらが選ばれて
+// いても関係なく、ジェスチャー発火の瞬間だけウェーブを最優先で表示するための仕組み
+// （2026-09-09発覚: ウェーブをLED効果の選択肢の1つとして実装していた旧方式だと、
+// レイヤー連動LEDが別の効果を選んでいる間はウェーブ用のRGB_MATRIXモードに切り替わって
+// いないため描画関数自体が呼ばれず、「ジェスチャーとレイヤー連動LEDがぶつかる」問題に
+// なっていた）。両ハーフ独立に動作するため、housekeeping_task_kbから両ハーフで
+// 毎スキャン呼ぶこと。
+void keyball_gesture_wave_task(void);
+#endif
+#endif
 
 #ifdef RGBLIGHT_ENABLE
 /// keyball_seasonal_led_task renders the seasonal LED effects (Halloween/Easter crossfade)

@@ -46,6 +46,17 @@ RGB_MATRIX_EFFECT(RIPPLE)
 // よる自作実装に置き換えている（色相・彩度はrgb_matrix_config.hsvをそのまま使う）。
 RGB_MATRIX_EFFECT(HEATMAP)
 
+#ifdef GESTURE_ENABLE
+// GESTURE_WAVE: トラックボール専用。複数ジェスチャーモードで実際にキーが送出された
+// 瞬間（keyball.hのkeyball_gesture_wave_trigger経由）にだけ、その方向に応じて
+// LEDが列(左右振り)/行(上下振り)単位で帯状に流れる。押している間ずっとではなく
+// 発火の都度1回（連続入力ONの方向なら連続して）発動する、Keyballならではの演出。
+// 他の自作エフェクトと違い、Web UIのLED_EFFECTS一覧には出さない（ユーザーが選択する
+// ものではなく、keyball_gesture_wave_task()がジェスチャー発火中だけ現在のモードを
+// 強制的にこれへ切り替え、終わったら元に戻す「常時有効なオーバーレイ」のため）。
+RGB_MATRIX_EFFECT(GESTURE_WAVE)
+#endif
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 // TRACKBALL専用: keyball.this_motion/that_motion（トラックボールの移動量）を
@@ -528,5 +539,106 @@ static bool HEATMAP(effect_params_t* params) {
     }
     return rgb_matrix_check_finished_leds(led_max);
 }
+
+#ifdef GESTURE_ENABLE
+// GESTURE_WAVE: RIPPLEと同じ固定スロット方式だが、「中心からの半径」ではなく
+// 「x座標(左右振り時)またはy座標(上下振り時)に沿った直線の帯」が進む点が異なる。
+// トリガー元(keyball.gesture_wave_*)はkeymap.cのジェスチャーエンジンが
+// keyball_gesture_wave_trigger()経由で書き込む（マスターは自分のハーフに即反映、
+// スレーブへは一方向RPCで伝えて同時に光らせる。詳細はkeyball.c参照）。
+static bool GESTURE_WAVE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    if (led_max <= led_min) return rgb_matrix_check_finished_leds(led_max);
+
+    // このハーフの安定したLED範囲（実測済み。TWINKLE/RIPPLEと同じ値）。
+    // RGB_MATRIX_USE_LIMITSのled_min/led_maxは1フレームの描画を約10個ずつの
+    // 小さなchunkに分けて複数回呼び出す仕組みで、chunkごとに範囲が変わる
+    // （TWINKLE修正時に判明した罠）。以前はこのchunk単位のled_min/led_maxで
+    // x/y座標の最小・最大をキャッシュしてしまっており、「たまたま最初に呼ばれた
+    // chunk」に含まれる一部のLEDだけを基準にした狭い範囲に固定されてしまっていた。
+    // これがウェーブの発光順が乱れる（無し側の左右）・向きが反転して見える
+    // （ボール側の左右）原因だった（2026-09-09発覚）。
+    uint8_t half_min = is_keyboard_left() ? 0 : 22;
+    uint8_t half_max = is_keyboard_left() ? 22 : RGB_MATRIX_LED_COUNT;
+
+    // このハーフのLED物理座標の範囲は起動後変わらないため一度だけ計測してキャッシュする。
+    static bool    bounds_ready = false;
+    static uint8_t x_min, x_max, y_min, y_max;
+    if (!bounds_ready) {
+        x_min = y_min = 255;
+        x_max = y_max = 0;
+        for (uint8_t i = half_min; i < half_max; i++) {
+            uint8_t x = g_led_config.point[i].x;
+            uint8_t y = g_led_config.point[i].y;
+            if (x < x_min) x_min = x;
+            if (x > x_max) x_max = x;
+            if (y < y_min) y_min = y;
+            if (y > y_max) y_max = y;
+        }
+        bounds_ready = true;
+    }
+
+    // 帯が端から端まで流れきるまでの時間。専用の速度設定を使う。通常LED/レイヤー
+    // 連動LEDのrgb_matrix_config.speedとは独立（本関数は選択式のエフェクトではなく、
+    // それらの設定を一時的に上書きして表示するものなので、共有のspeedを読んでも
+    // 意味のある値とは限らないため）。分割両ハーフはそれぞれ別のEEPROMを持つため
+    // kb_gesture_wave_speed_get()をここで直接呼ぶとハーフ間で値がずれる恐れがあり、
+    // 代わりに発火のたびにkeyball.cがRPCで両ハーフへ配ったkeyball.gesture_wave_speed
+    // を読む（詳細はkeyball.hのコメント参照）。
+    const uint16_t WAVE_MS    = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    const uint8_t  WAVE_WIDTH = 20;  // 帯の太さ（g_led_config.point座標系での幅）
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時点灯（他のトラックボール系エフェクトと同じ扱い）
+        } else {
+            out.v = 0;
+            for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+                if (!keyball.gesture_wave_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(keyball.gesture_wave_start[s]);
+                if (elapsed >= WAVE_MS) continue;
+
+                uint8_t dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
+                bool    horizontal = (dir == 2 || dir == 3);
+                uint8_t coord      = horizontal ? g_led_config.point[i].x : g_led_config.point[i].y;
+                uint8_t range_min  = horizontal ? x_min : y_min;
+                uint8_t range_max  = horizontal ? x_max : y_max;
+                uint16_t range     = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
+
+                // 起点: 下(1)は上端(y_min)から進む。上(0)は下端(y_max、QMKの座標系は
+                // yが下ほど大きいため「下」に相当)から進む。
+                // 左右方向は実機確認の結果、g_led_config.point.xの大小が実際の左右とは
+                // 逆だったため(2026-09-09)、上下とは別に反転させている: 右(3)は右端
+                // (x_max)から、左(2)は左端(x_min)から進む。
+                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
+                uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
+
+                // 経過時間による全体フェードはかけない（本人希望：光ったらすぐ消える、
+                // じわじわ暗くなる演出は不要）。帯の位置からの距離だけで明るさを決めるので、
+                // 帯が通り過ぎたLEDはすぐ消灯し、帯がまだ来ていないLEDも光らない。
+                int16_t d = (int16_t)coord - (int16_t)wave_coord;
+                if (d < 0) d = -d;
+                if (d < WAVE_WIDTH) {
+                    uint8_t bright = (uint8_t)(255 - ((uint32_t)d * 255 / WAVE_WIDTH));
+                    if (bright > out.v) out.v = bright;  // 帯同士が重なる場合は明るい方を採用
+                }
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+
+    for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+        if (keyball.gesture_wave_active[s] && timer_elapsed(keyball.gesture_wave_start[s]) >= WAVE_MS) {
+            keyball.gesture_wave_active[s] = false;
+        }
+    }
+
+    return rgb_matrix_check_finished_leds(led_max);
+}
+#endif // GESTURE_ENABLE
 
 #endif // RGB_MATRIX_CUSTOM_EFFECT_IMPLS

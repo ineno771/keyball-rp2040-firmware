@@ -76,6 +76,9 @@ uint8_t kb_hid_led_effect_count(void) {
 #define LED_EFFECT_ID_TYPING_HEATMAP  15
 #define LED_EFFECT_ID_TRACKBALL       16
 #define LED_EFFECT_ID_RIPPLE          17
+// GESTURE_ENABLEのあるファーム（複数ジェスチャーモード対応）でのみ意味を持つ。
+// GESTURE_ENABLE無しのビルドでもID自体は予約しておき、他エフェクトとの番号衝突を防ぐ。
+#define LED_EFFECT_ID_GESTURE_WAVE    18
 #ifdef RGB_MATRIX_CUSTOM_USER
 static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
     RGB_MATRIX_NONE,               //  0: オフ
@@ -111,6 +114,9 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
     if (effect_id == LED_EFFECT_ID_TYPING_HEATMAP) return RGB_MATRIX_CUSTOM_HEATMAP;
     if (effect_id == LED_EFFECT_ID_TRACKBALL) return RGB_MATRIX_CUSTOM_TRACKBALL;
     if (effect_id == LED_EFFECT_ID_RIPPLE) return RGB_MATRIX_CUSTOM_RIPPLE;
+#ifdef GESTURE_ENABLE
+    if (effect_id == LED_EFFECT_ID_GESTURE_WAVE) return RGB_MATRIX_CUSTOM_GESTURE_WAVE;
+#endif
 #endif
     if (effect_id >= RGB_MATRIX_LED_EFFECT_COUNT) effect_id = 0;
     return RGB_MATRIX_LED_EFFECT_MAP[effect_id];
@@ -458,6 +464,36 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         case KB_HID_CMD_SET_GESTURE_THRESHOLD: {
             kb_gesture_th_h_set(data[1]);
             kb_gesture_th_v_set(data[2]);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x24: ジェスチャー連動LEDウェーブの速さを返す
+        // 応答: [cmd, speed, status]
+        case KB_HID_CMD_GET_GESTURE_WAVE_SPEED: {
+            response[1] = kb_gesture_wave_speed_get();
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x25: ジェスチャー連動LEDウェーブの速さを変更
+        // 要求: [cmd, speed]
+        case KB_HID_CMD_SET_GESTURE_WAVE_SPEED: {
+            kb_gesture_wave_speed_set(data[1]);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x26: ジェスチャー連動LEDウェーブの有効/無効を返す
+        case KB_HID_CMD_GET_GESTURE_WAVE_ENABLE: {
+            response[1] = kb_gesture_wave_enable_get() ? 1 : 0;
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x27: ジェスチャー連動LEDウェーブの有効/無効を変更
+        case KB_HID_CMD_SET_GESTURE_WAVE_ENABLE: {
+            kb_gesture_wave_enable_set(data[1] != 0);
             response[1] = KB_HID_STATUS_OK;
             break;
         }

@@ -269,7 +269,10 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             kb_gesture_mode_t m    = kb_gesture_mode_get(gst_mode);
             uint16_t          kc   = m.key[dir];
             bool              cont = (m.continuous >> dir) & 1;
-            if (kc) tap_code16(kc);
+            if (kc) {
+                tap_code16(kc);
+                keyball_gesture_wave_trigger(dir);  // 未割当方向(kc==0)では発動させない
+            }
 
             if (cont) {
                 // 連続入力: しきい値分だけ引いて余りを持ち越す（クールダウンなし）。

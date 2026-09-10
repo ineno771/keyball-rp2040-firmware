@@ -190,6 +190,41 @@ void kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg) {
     uint16_t addr = KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)mode * KB_GESTURE_MODE_ENTRY_SIZE;
     eeprom_write_block(buf, (void *)(uintptr_t)addr, KB_GESTURE_MODE_ENTRY_SIZE);
 }
+
+// ── ジェスチャー連動LEDウェーブの速さ（ジェスチャーしきい値と同パターン）────
+static uint8_t g_gesture_wave_speed        = 0xEE;
+static bool    g_gesture_wave_speed_loaded = false;
+
+uint8_t kb_gesture_wave_speed_get(void) {
+    if (!g_gesture_wave_speed_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_WAVE_SPEED_EEPROM);
+        g_gesture_wave_speed = (v >= KB_GESTURE_WAVE_SPEED_MIN && v <= KB_GESTURE_WAVE_SPEED_MAX) ? v : KB_GESTURE_WAVE_SPEED_DEFAULT;
+        g_gesture_wave_speed_loaded = true;
+    }
+    return g_gesture_wave_speed;
+}
+
+void kb_gesture_wave_speed_set(uint8_t v) {
+    g_gesture_wave_speed = (v >= KB_GESTURE_WAVE_SPEED_MIN && v <= KB_GESTURE_WAVE_SPEED_MAX) ? v : KB_GESTURE_WAVE_SPEED_DEFAULT;
+    g_gesture_wave_speed_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_WAVE_SPEED_EEPROM, g_gesture_wave_speed);
+}
+
+// ── ジェスチャー連動LEDウェーブ機能の有効/無効（既定ON。理由はkb_settings.h参照）──
+static int8_t g_gesture_wave_enable = -1;  // -1=未確認 0=OFF 1=ON
+
+bool kb_gesture_wave_enable_get(void) {
+    if (g_gesture_wave_enable < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_WAVE_ENABLE_EEPROM);
+        g_gesture_wave_enable = (v == 1) ? 0 : 1;  // 1のみ明示的なOFF、それ以外は既定ON
+    }
+    return g_gesture_wave_enable != 0;
+}
+
+void kb_gesture_wave_enable_set(bool v) {
+    g_gesture_wave_enable = v ? 1 : 0;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_WAVE_ENABLE_EEPROM, v ? 0 : 1);
+}
 #endif
 
 // ── 超低速モードのCPI分周値（同上パターン）──────────────────────────
