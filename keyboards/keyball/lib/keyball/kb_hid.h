@@ -48,6 +48,15 @@
 #define KB_HID_CMD_SET_GESTURE_WAVE_SPEED 0x25  // ジェスチャー連動LEDウェーブの速さ変更
 #define KB_HID_CMD_GET_GESTURE_WAVE_ENABLE 0x26  // ジェスチャー連動LEDウェーブの有効/無効取得
 #define KB_HID_CMD_SET_GESTURE_WAVE_ENABLE 0x27  // ジェスチャー連動LEDウェーブの有効/無効変更
+#define KB_HID_CMD_GET_SHAKE              0x28  // シェイク機能（発動キー・感度）取得
+#define KB_HID_CMD_SET_SHAKE              0x29  // シェイク機能（発動キー・感度）変更
+#define KB_HID_CMD_GET_DFLICK             0x2A  // ダブルフリック（方向別キー・時間窓）取得
+#define KB_HID_CMD_SET_DFLICK             0x2B  // ダブルフリック（方向別キー・時間窓）変更
+#define KB_HID_CMD_GET_COMBO              0x2C  // 指定コンボスロット(0-7)の設定取得
+#define KB_HID_CMD_SET_COMBO              0x2D  // 指定コンボスロット(0-7)の設定変更
+#define KB_HID_CMD_GET_OS                 0x2E  // OS自動判別: 現在検出しているOS種別を取得（0=不明,1=Linux,2=Windows,3=macOS,4=iOS）
+#define KB_HID_CMD_GET_DPI_CURVE          0x2F  // DPIカーブ（有効/無効・出力5点）取得
+#define KB_HID_CMD_SET_DPI_CURVE          0x30  // DPIカーブ（有効/無効・出力5点）変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
@@ -70,6 +79,17 @@ uint8_t kb_hid_led_effect_count(void);
 // RGBLIGHT版のkb_hid_led_effect_to_mode()に相当するRGB_MATRIX版の変換元。
 // 実際のRGB_MATRIX_*定数（自作エフェクト含む）に変換する。範囲外のIDは0（オフ相当）扱い。
 uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id);
+
+// UG_TOG/UG_NEXT/UG_HUE+等（QK_UNDERGLOW_*、quantum/process_keycode/process_underglow.c）は
+// RGB_MATRIX本体の状態を直接書き換えるが、本ファームの「通常（レイヤー0）LED設定」は
+// kb_led_config（EEPROM独自管理領域）が唯一の正とされていて、起動時・レイヤー連動LED/
+// ジェスチャーウェーブのオーバーライド終了時にkeyball_apply_normal_led()がRGB_MATRIX本体を
+// kb_led_configの値へ強制的に書き戻す。UG_*キーでの変更はkb_led_config側に反映されない
+// ため、その次の書き戻しタイミング（次回起動、あるいはオーバーライド終了時）で変更が
+// 消えてしまう不具合があった（「Val+/Val-を押しても効かない」）。
+// UG_*キー押下後にRGB_MATRIX本体の実際の状態を読み戻し、kb_led_configへ反映することで
+// 同期を保つ。post_process_record_user（keymap.c）から呼ぶ。
+void kb_led_config_sync_from_rgb_matrix(void);
 #endif
 
 #if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)

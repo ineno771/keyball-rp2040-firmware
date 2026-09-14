@@ -258,10 +258,12 @@ static bool TWINKLE(effect_params_t* params) {
     //
     // さらに、発生位置の抽選は「そのiterのchunk内」ではなくハーフ全体から行う必要がある
     // （chunk単位で抽選すると、判定が真っ先に成立する先頭chunk付近ばかりに偏って発生
-    // していた）。ハーフ全体の範囲はconfig.hのRGB_MATRIX_SPLIT { 22, 24 }と一致
-    // （ボール側=idx0-21、無し側=idx22-45、実測済み）。
-    uint8_t half_min   = is_keyboard_left() ? 0 : 22;
-    uint8_t half_max   = is_keyboard_left() ? 22 : RGB_MATRIX_LED_COUNT;
+    // していた）。ハーフ全体の範囲はconfig.hのRGB_MATRIX_SPLIT { 26, 29 }と対応
+    // （Keyball39からの移植時点では暫定値。is_keyboard_left()=trueの側を
+    // ボール側=idx0-25としているが、実際にどちらの半身がidx0側かは未検証。
+    // 実機到着後、g_led_configの校正と合わせて確認・修正すること）。
+    uint8_t half_min   = is_keyboard_left() ? 0 : 26;
+    uint8_t half_max   = is_keyboard_left() ? 26 : RGB_MATRIX_LED_COUNT;
     uint8_t half_count = half_max - half_min;
 
     if (led_max > led_min) {
@@ -380,8 +382,8 @@ static bool RIPPLE(effect_params_t* params) {
     // 波紋の中心座標が反対側ハーフの物理位置になり、中央付近のキー（col4等）を押した際に
     // 反対側ハーフのLEDまで反応してしまう（TWINKLE修正時と同じ理由でper-iterの
     // led_min/led_maxではなくハーフ全体の安定した範囲で判定する必要がある）。
-    uint8_t half_min = is_keyboard_left() ? 0 : 22;
-    uint8_t half_max = is_keyboard_left() ? 22 : RGB_MATRIX_LED_COUNT;
+    uint8_t half_min = is_keyboard_left() ? 0 : 26;
+    uint8_t half_max = is_keyboard_left() ? 26 : RGB_MATRIX_LED_COUNT;
 
     // 新規ヒットを取り込む。g_last_hit_trackerはREACTIVE_KEYSと同じく「十分新しい
     // ものだけ」判定で、長時間使用時にtickが古い情報を誤って取り込むのを防ぐ。
@@ -565,8 +567,8 @@ static bool GESTURE_WAVE(effect_params_t* params) {
     // chunk」に含まれる一部のLEDだけを基準にした狭い範囲に固定されてしまっていた。
     // これがウェーブの発光順が乱れる（無し側の左右）・向きが反転して見える
     // （ボール側の左右）原因だった（2026-09-09発覚）。
-    uint8_t half_min = is_keyboard_left() ? 0 : 22;
-    uint8_t half_max = is_keyboard_left() ? 22 : RGB_MATRIX_LED_COUNT;
+    uint8_t half_min = is_keyboard_left() ? 0 : 26;
+    uint8_t half_max = is_keyboard_left() ? 26 : RGB_MATRIX_LED_COUNT;
 
     // このハーフのLED物理座標の範囲は起動後変わらないため一度だけ計測してキャッシュする。
     static bool    bounds_ready = false;

@@ -89,6 +89,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #elif (PRODUCT_ID & 0xff00) == 0x0600
 // keyball-rp2040-firmware（Keyball39 RP2040版）。基板形状はKeyball39と同一のため39として扱う。
 #    define KEYBALL_MODEL 39
+#elif (PRODUCT_ID & 0xff00) == 0x0700
+// keyball-rp2040-firmware（Keyball+ RP2040版）。基板形状はAVR版Keyball+と同一のため139として扱う。
+#    define KEYBALL_MODEL 139
 #endif
 
 #define KEYBALL_OLED_MAX_PRESSING_KEYCODES 6
@@ -309,6 +312,12 @@ void keyball_gesture_wave_trigger(uint8_t direction);
 // なっていた）。両ハーフ独立に動作するため、housekeeping_task_kbから両ハーフで
 // 毎スキャン呼ぶこと。
 void keyball_gesture_wave_task(void);
+
+/// keyball_gesture_wave_overriding reports whether the gesture-wave LED effect is currently
+/// being force-displayed (overriding the normal/layer-linked LED). kb_hid.c's UG_*キー同期
+/// 処理（kb_led_config_sync_from_rgb_matrix）が、ウェーブの一時的な色をkb_led_configへ
+/// 誤って書き込まないようにするために使う。
+bool keyball_gesture_wave_overriding(void);
 #endif
 #endif
 

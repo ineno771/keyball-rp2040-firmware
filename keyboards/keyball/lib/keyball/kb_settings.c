@@ -23,6 +23,10 @@ kb_settings_t kb_settings_get(void) {
         if (g_cache.tapping_term == 0xFFFF || g_cache.tapping_term < 50 || g_cache.tapping_term > 1000) {
             memset(&g_cache, 0, sizeof(g_cache));
             g_cache.tapping_term = KB_SETTINGS_DEFAULT_TT;
+            // 2026-09-11、本人希望により Permissive Hold を既定でON にする（一度でも
+            // 設定を保存したことがある機体は保存値が優先されるので、この初期値が
+            // 効くのは工場出荷/設定リセット直後のみ）。
+            g_cache.flags |= KB_FLAG_PERMISSIVE_HOLD;
         }
         // AML設定が未初期化(0)または範囲外なら既定値へ補正（旧FWからの移行も安全に）
         if (g_cache.aml_layer == 0 || g_cache.aml_layer > 7)         g_cache.aml_layer = 1;
@@ -404,4 +408,309 @@ void kb_scroll_inertia_flick_mult_set(uint8_t v) {
     g_scroll_inertia_flick_mult        = v;
     g_scroll_inertia_flick_mult_loaded = true;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_SCROLL_INERTIA_FLICK_MULT_EEPROM, (uint8_t)g_scroll_inertia_flick_mult);
+}
+
+// ── シェイク機能（発動キー・感度。ジェスチャーしきい値と同パターン）──────────
+static uint16_t g_shake_key        = 0;
+static bool     g_shake_key_loaded = false;
+
+uint16_t kb_shake_key_get(void) {
+    if (!g_shake_key_loaded) {
+        uint8_t hi = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SHAKE_KEY_EEPROM);
+        uint8_t lo = eeprom_read_byte((const uint8_t *)(uintptr_t)(KB_SHAKE_KEY_EEPROM + 1));
+        g_shake_key        = ((uint16_t)hi << 8) | lo;
+        g_shake_key_loaded = true;
+    }
+    return g_shake_key;
+}
+
+void kb_shake_key_set(uint16_t v) {
+    g_shake_key        = v;
+    g_shake_key_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SHAKE_KEY_EEPROM, (uint8_t)(v >> 8));
+    eeprom_write_byte((uint8_t *)(uintptr_t)(KB_SHAKE_KEY_EEPROM + 1), (uint8_t)v);
+}
+
+static uint8_t g_shake_threshold        = 0xEE;
+static bool    g_shake_threshold_loaded = false;
+
+uint8_t kb_shake_threshold_get(void) {
+    if (!g_shake_threshold_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SHAKE_THRESHOLD_EEPROM);
+        g_shake_threshold = (v >= KB_SHAKE_THRESHOLD_MIN && v <= KB_SHAKE_THRESHOLD_MAX) ? v : KB_SHAKE_THRESHOLD_DEFAULT;
+        g_shake_threshold_loaded = true;
+    }
+    return g_shake_threshold;
+}
+
+void kb_shake_threshold_set(uint8_t v) {
+    g_shake_threshold        = (v >= KB_SHAKE_THRESHOLD_MIN && v <= KB_SHAKE_THRESHOLD_MAX) ? v : KB_SHAKE_THRESHOLD_DEFAULT;
+    g_shake_threshold_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SHAKE_THRESHOLD_EEPROM, g_shake_threshold);
+}
+
+// ── シェイク判定の厳しさ（反転回数・許容時間。ジェスチャーしきい値と同パターン）──
+static uint8_t g_shake_reversals_needed        = 0xEE;
+static bool    g_shake_reversals_needed_loaded = false;
+
+uint8_t kb_shake_reversals_get(void) {
+    if (!g_shake_reversals_needed_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SHAKE_REVERSALS_EEPROM);
+        g_shake_reversals_needed = (v >= KB_SHAKE_REVERSALS_MIN && v <= KB_SHAKE_REVERSALS_MAX) ? v : KB_SHAKE_REVERSALS_DEFAULT;
+        g_shake_reversals_needed_loaded = true;
+    }
+    return g_shake_reversals_needed;
+}
+
+void kb_shake_reversals_set(uint8_t v) {
+    g_shake_reversals_needed        = (v >= KB_SHAKE_REVERSALS_MIN && v <= KB_SHAKE_REVERSALS_MAX) ? v : KB_SHAKE_REVERSALS_DEFAULT;
+    g_shake_reversals_needed_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SHAKE_REVERSALS_EEPROM, g_shake_reversals_needed);
+}
+
+static uint8_t g_shake_run_max        = 0xEE;
+static bool    g_shake_run_max_loaded = false;
+
+uint16_t kb_shake_run_max_ms_get(void) {
+    if (!g_shake_run_max_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SHAKE_RUN_MAX_EEPROM);
+        g_shake_run_max = (v >= KB_SHAKE_RUN_MAX_MIN && v <= KB_SHAKE_RUN_MAX_MAX) ? v : KB_SHAKE_RUN_MAX_DEFAULT;
+        g_shake_run_max_loaded = true;
+    }
+    return (uint16_t)g_shake_run_max * 10;
+}
+
+void kb_shake_run_max_ms_set(uint16_t ms) {
+    uint8_t v = (uint8_t)(ms / 10);
+    g_shake_run_max        = (v >= KB_SHAKE_RUN_MAX_MIN && v <= KB_SHAKE_RUN_MAX_MAX) ? v : KB_SHAKE_RUN_MAX_DEFAULT;
+    g_shake_run_max_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SHAKE_RUN_MAX_EEPROM, g_shake_run_max);
+}
+
+// ── ダブルフリック（方向ごとの発動キー・時間窓・フリック判定しきい値）─────────
+static uint16_t g_dflick_key[4]     = {0, 0, 0, 0};
+static bool     g_dflick_key_loaded = false;
+
+static void kb_dflick_keys_ensure_loaded(void) {
+    if (g_dflick_key_loaded) return;
+    for (uint8_t i = 0; i < 4; i++) {
+        uint16_t addr = KB_DFLICK_KEY_TABLE_EEPROM + (uint16_t)i * 2;
+        uint8_t  hi   = eeprom_read_byte((const uint8_t *)(uintptr_t)addr);
+        uint8_t  lo   = eeprom_read_byte((const uint8_t *)(uintptr_t)(addr + 1));
+        g_dflick_key[i] = ((uint16_t)hi << 8) | lo;
+    }
+    g_dflick_key_loaded = true;
+}
+
+uint16_t kb_dflick_key_get(uint8_t dir) {
+    kb_dflick_keys_ensure_loaded();
+    if (dir >= 4) return 0;
+    return g_dflick_key[dir];
+}
+
+void kb_dflick_key_set(uint8_t dir, uint16_t v) {
+    kb_dflick_keys_ensure_loaded();
+    if (dir >= 4) return;
+    g_dflick_key[dir] = v;
+    uint16_t addr     = KB_DFLICK_KEY_TABLE_EEPROM + (uint16_t)dir * 2;
+    eeprom_write_byte((uint8_t *)(uintptr_t)addr, (uint8_t)(v >> 8));
+    eeprom_write_byte((uint8_t *)(uintptr_t)(addr + 1), (uint8_t)v);
+}
+
+static uint8_t g_dflick_window        = 0xEE;
+static bool    g_dflick_window_loaded = false;
+
+uint16_t kb_dflick_window_ms_get(void) {
+    if (!g_dflick_window_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DFLICK_WINDOW_EEPROM);
+        g_dflick_window = (v >= KB_DFLICK_WINDOW_MIN && v <= KB_DFLICK_WINDOW_MAX) ? v : KB_DFLICK_WINDOW_DEFAULT;
+        g_dflick_window_loaded = true;
+    }
+    return (uint16_t)g_dflick_window * 10;
+}
+
+void kb_dflick_window_ms_set(uint16_t ms) {
+    uint8_t v = (uint8_t)(ms / 10);
+    g_dflick_window        = (v >= KB_DFLICK_WINDOW_MIN && v <= KB_DFLICK_WINDOW_MAX) ? v : KB_DFLICK_WINDOW_DEFAULT;
+    g_dflick_window_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DFLICK_WINDOW_EEPROM, g_dflick_window);
+}
+
+static uint8_t g_dflick_flick_threshold        = 0xEE;
+static bool    g_dflick_flick_threshold_loaded = false;
+
+uint8_t kb_dflick_flick_threshold_get(void) {
+    if (!g_dflick_flick_threshold_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DFLICK_FLICK_THRESHOLD_EEPROM);
+        g_dflick_flick_threshold = (v >= KB_DFLICK_FLICK_THRESHOLD_MIN && v <= KB_DFLICK_FLICK_THRESHOLD_MAX) ? v : KB_DFLICK_FLICK_THRESHOLD_DEFAULT;
+        g_dflick_flick_threshold_loaded = true;
+    }
+    return g_dflick_flick_threshold;
+}
+
+void kb_dflick_flick_threshold_set(uint8_t v) {
+    g_dflick_flick_threshold        = (v >= KB_DFLICK_FLICK_THRESHOLD_MIN && v <= KB_DFLICK_FLICK_THRESHOLD_MAX) ? v : KB_DFLICK_FLICK_THRESHOLD_DEFAULT;
+    g_dflick_flick_threshold_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DFLICK_FLICK_THRESHOLD_EEPROM, g_dflick_flick_threshold);
+}
+
+// ── シェイク・ダブルフリックそれぞれの有効/無効（既定ON。ウェーブ有効/無効と同パターン）──
+static int8_t g_shake_enable = -1;  // -1=未確認 0=OFF 1=ON
+
+bool kb_shake_enable_get(void) {
+    if (g_shake_enable < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_SHAKE_ENABLE_EEPROM);
+        g_shake_enable = (v == 1) ? 0 : 1;  // 1のみ明示的なOFF、それ以外は既定ON
+    }
+    return g_shake_enable != 0;
+}
+
+void kb_shake_enable_set(bool v) {
+    g_shake_enable = v ? 1 : 0;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_SHAKE_ENABLE_EEPROM, v ? 0 : 1);
+}
+
+static int8_t g_dflick_enable = -1;  // -1=未確認 0=OFF 1=ON
+
+bool kb_dflick_enable_get(void) {
+    if (g_dflick_enable < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DFLICK_ENABLE_EEPROM);
+        g_dflick_enable = (v == 1) ? 0 : 1;  // 1のみ明示的なOFF、それ以外は既定ON
+    }
+    return g_dflick_enable != 0;
+}
+
+void kb_dflick_enable_set(bool v) {
+    g_dflick_enable = v ? 1 : 0;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DFLICK_ENABLE_EEPROM, v ? 0 : 1);
+}
+
+// ── ダブルフリックの最大継続時間（ジェスチャーしきい値と同パターン）──────────
+static uint8_t g_dflick_max_duration        = 0xEE;
+static bool    g_dflick_max_duration_loaded = false;
+
+uint16_t kb_dflick_max_duration_ms_get(void) {
+    if (!g_dflick_max_duration_loaded) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DFLICK_MAX_DURATION_EEPROM);
+        g_dflick_max_duration = (v >= KB_DFLICK_MAX_DURATION_MIN && v <= KB_DFLICK_MAX_DURATION_MAX) ? v : KB_DFLICK_MAX_DURATION_DEFAULT;
+        g_dflick_max_duration_loaded = true;
+    }
+    return (uint16_t)g_dflick_max_duration * 10;
+}
+
+void kb_dflick_max_duration_ms_set(uint16_t ms) {
+    uint8_t v = (uint8_t)(ms / 10);
+    g_dflick_max_duration        = (v >= KB_DFLICK_MAX_DURATION_MIN && v <= KB_DFLICK_MAX_DURATION_MAX) ? v : KB_DFLICK_MAX_DURATION_DEFAULT;
+    g_dflick_max_duration_loaded = true;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DFLICK_MAX_DURATION_EEPROM, g_dflick_max_duration);
+}
+
+// ── DPIカーブ（kb_settings.h参照）────────────────────────────────
+const uint8_t KB_DPI_CURVE_X[KB_DPI_CURVE_POINT_COUNT] = {0, 16, 32, 48, 64, 80, 96, 112, 127};
+
+static int8_t g_dpi_curve_enable = -1;  // -1=未確認 0=OFF 1=ON
+
+bool kb_dpi_curve_enable_get(void) {
+    if (g_dpi_curve_enable < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DPI_CURVE_ENABLE_EEPROM);
+        g_dpi_curve_enable = (v == 1) ? 1 : 0;  // 1のみ明示的なON、それ以外(未書込みの0x00含む)は既定OFF
+    }
+    return g_dpi_curve_enable != 0;
+}
+
+void kb_dpi_curve_enable_set(bool v) {
+    g_dpi_curve_enable = v ? 1 : 0;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DPI_CURVE_ENABLE_EEPROM, v ? 1 : 0);
+}
+
+static uint8_t g_dpi_curve_points[KB_DPI_CURVE_POINT_COUNT];
+static bool    g_dpi_curve_points_loaded = false;
+
+const uint8_t *kb_dpi_curve_points_get(void) {
+    if (!g_dpi_curve_points_loaded) {
+        // KB_TRACKBALL_LAYERS_MAGIC_EEPROMと同じ理由（RP2040のEEPROMは未書込み領域が
+        // 0x00になるため、目印バイトが無い間は生バイトを信用せず既定のY=Xを返す）。
+        uint8_t magic = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DPI_CURVE_MAGIC_EEPROM);
+        if (magic == KB_DPI_CURVE_MAGIC_VALUE) {
+            eeprom_read_block(g_dpi_curve_points, (const void *)(uintptr_t)KB_DPI_CURVE_POINTS_EEPROM, KB_DPI_CURVE_POINT_COUNT);
+        } else {
+            for (uint8_t i = 0; i < KB_DPI_CURVE_POINT_COUNT; i++) g_dpi_curve_points[i] = KB_DPI_CURVE_X[i];
+        }
+        g_dpi_curve_points_loaded = true;
+    }
+    return g_dpi_curve_points;
+}
+
+static bool g_dpi_curve_lut_valid = false;
+
+void kb_dpi_curve_points_set(const uint8_t *points) {
+    memcpy(g_dpi_curve_points, points, KB_DPI_CURVE_POINT_COUNT);
+    g_dpi_curve_points_loaded = true;
+    eeprom_write_block(g_dpi_curve_points, (void *)(uintptr_t)KB_DPI_CURVE_POINTS_EEPROM, KB_DPI_CURVE_POINT_COUNT);
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_DPI_CURVE_MAGIC_EEPROM, KB_DPI_CURVE_MAGIC_VALUE);
+    g_dpi_curve_lut_valid = false;  // 設定が変わったのでルックアップテーブルを作り直す
+}
+
+// 単調3次エルミート曲線（Fritsch-Carlsonの簡略版）で5点を滑らかに結ぶ。
+// sqrtを使わない代わりに、各区間の接線の傾き比(alpha/beta)を個別に[0,3]へ
+// クランプする十分条件を使う（本来の円条件より少し保守的だが、オーバーシュート
+// せず単調性が崩れにくい・sqrtf不要で組み込み向き、という判断）。
+static uint8_t g_dpi_curve_lut[KB_DPI_CURVE_LUT_SIZE];
+
+static void kb_dpi_curve_rebuild_lut(void) {
+    const uint8_t *ys = kb_dpi_curve_points_get();
+    const uint8_t  n  = KB_DPI_CURVE_POINT_COUNT;
+
+    float d[KB_DPI_CURVE_POINT_COUNT - 1];  // 区間ごとの平均勾配（割線）
+    for (uint8_t i = 0; i < n - 1; i++) {
+        float dx = (float)(KB_DPI_CURVE_X[i + 1] - KB_DPI_CURVE_X[i]);
+        d[i]     = ((float)ys[i + 1] - (float)ys[i]) / dx;
+    }
+
+    float m[KB_DPI_CURVE_POINT_COUNT];  // 各点の接線の傾き
+    m[0]     = d[0];
+    m[n - 1] = d[n - 2];
+    for (uint8_t i = 1; i < n - 1; i++) {
+        m[i] = (d[i - 1] + d[i]) / 2.0f;
+    }
+    for (uint8_t i = 0; i < n - 1; i++) {
+        if (d[i] == 0.0f) {
+            m[i] = 0.0f;
+            m[i + 1] = 0.0f;
+            continue;
+        }
+        float alpha = m[i] / d[i];
+        float beta  = m[i + 1] / d[i];
+        if (alpha < 0.0f) m[i] = 0.0f;
+        else if (alpha > 3.0f) m[i] = 3.0f * d[i];
+        if (beta < 0.0f) m[i + 1] = 0.0f;
+        else if (beta > 3.0f) m[i + 1] = 3.0f * d[i];
+    }
+
+    for (uint16_t x = 0; x < KB_DPI_CURVE_LUT_SIZE; x++) {
+        uint8_t seg = n - 2;
+        for (uint8_t i = 0; i < n - 1; i++) {
+            if (x <= KB_DPI_CURVE_X[i + 1]) { seg = i; break; }
+        }
+        float x0 = (float)KB_DPI_CURVE_X[seg];
+        float x1 = (float)KB_DPI_CURVE_X[seg + 1];
+        float h  = x1 - x0;
+        float t  = (h > 0.0f) ? ((float)x - x0) / h : 0.0f;
+        float t2 = t * t, t3 = t2 * t;
+        float h00 = 2 * t3 - 3 * t2 + 1;
+        float h10 = t3 - 2 * t2 + t;
+        float h01 = -2 * t3 + 3 * t2;
+        float h11 = t3 - t2;
+        float y   = h00 * ys[seg] + h10 * h * m[seg] + h01 * ys[seg + 1] + h11 * h * m[seg + 1];
+        int32_t yi = (int32_t)(y + 0.5f);
+        if (yi < 0) yi = 0;
+        if (yi > 255) yi = 255;
+        g_dpi_curve_lut[x] = (uint8_t)yi;
+    }
+    g_dpi_curve_lut_valid = true;
+}
+
+const uint8_t *kb_dpi_curve_lut_get(void) {
+    if (!g_dpi_curve_lut_valid) kb_dpi_curve_rebuild_lut();
+    return g_dpi_curve_lut;
 }

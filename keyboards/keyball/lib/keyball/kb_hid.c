@@ -11,6 +11,14 @@
 #    include "td_config.h"
 #endif
 #include "kb_settings.h"
+#ifdef COMBO_ENABLE
+#    include "kb_combo.h"
+#endif
+#ifdef OS_DETECTION_ENABLE
+#    include "os_detection.h"
+// keymap.c 側で実体定義。OS判別結果と KB_FLAG_OS_AUTO_SWAP から Cmd/Ctrl 入れ替えを反映する。
+void kb_apply_os_swap(os_variant_t os);
+#endif
 #ifndef LED_VERSION_BUILD
 #include "kb_macro.h"
 #endif
@@ -120,6 +128,73 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
 #endif
     if (effect_id >= RGB_MATRIX_LED_EFFECT_COUNT) effect_id = 0;
     return RGB_MATRIX_LED_EFFECT_MAP[effect_id];
+}
+
+void kb_led_config_sync_from_rgb_matrix(void) {
+    // レイヤー連動LEDのオーバーライド表示中は、色相・彩度・明るさ・速度も含めて画面に
+    // 出ている値が全て「通常」のものではない（apply_layer_led_now()がそのレイヤーの
+    // 色をrgb_matrix本体へ直接書き込むため）。ここで読み戻すとkb_led_configが上書きの
+    // 色で汚染されてしまうので、その場合は何もしない（一時的な変更は、オーバーライドが
+    // 終わった時点で元の通常設定に戻る仕様のまま＝変更は捨てられる）。
+    if (keyball_layer_led_overriding()) return;
+
+    kb_led_config_t cfg = kb_led_config_get();
+
+    if (!rgb_matrix_is_enabled()) {
+        cfg.effect_id = 0;
+        kb_led_config_set(&cfg);
+        return;
+    }
+
+    bool sync_mode = true;
+#ifdef GESTURE_ENABLE
+    // ジェスチャーウェーブのオーバーライド中は、keyball_gesture_wave_task()が現在の
+    // モード(effect_id)だけを強制的にウェーブ自身へ切り替えている（色相・彩度・明るさ・
+    // 速度には一切触れない。keyball.c参照）。そのためモードだけは「ウェーブ」という
+    // 一時的な値になっており同期できないが、色相・彩度・明るさ・速度は「通常」の値の
+    // ままなので、このオーバーライド中でも問題なく同期してよい（2026-09-11発覚：
+    // ここを他のフィールドまで丸ごとスキップしていたため、ジェスチャーウェーブが
+    // 頻繁に発火する状況ではSat等の変更がしばしば同期されずに消えてしまっていた）。
+    if (keyball_gesture_wave_overriding()) sync_mode = false;
+#endif
+
+    if (sync_mode) {
+        uint8_t mode      = rgb_matrix_get_mode();
+        uint8_t effect_id = cfg.effect_id;  // 該当するIDが見つからない時は変更しない
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_EFFECT_COUNT; i++) {
+            if (RGB_MATRIX_LED_EFFECT_MAP[i] == mode) {
+                effect_id = i;
+                break;
+            }
+        }
+#ifdef RGB_MATRIX_CUSTOM_USER
+        if (mode == RGB_MATRIX_CUSTOM_HALLOWEEN) {
+            effect_id = KB_LED_EFFECT_HALLOWEEN;
+        } else if (mode == RGB_MATRIX_CUSTOM_EASTER) {
+            effect_id = KB_LED_EFFECT_EASTER;
+        } else if (mode == RGB_MATRIX_CUSTOM_REACTIVE_KEYS) {
+            effect_id = LED_EFFECT_ID_REACTIVE_KEYS;
+        } else if (mode == RGB_MATRIX_CUSTOM_HEATMAP) {
+            effect_id = LED_EFFECT_ID_TYPING_HEATMAP;
+        } else if (mode == RGB_MATRIX_CUSTOM_TRACKBALL) {
+            effect_id = LED_EFFECT_ID_TRACKBALL;
+        } else if (mode == RGB_MATRIX_CUSTOM_RIPPLE) {
+            effect_id = LED_EFFECT_ID_RIPPLE;
+        }
+#ifdef GESTURE_ENABLE
+        else if (mode == RGB_MATRIX_CUSTOM_GESTURE_WAVE) {
+            effect_id = LED_EFFECT_ID_GESTURE_WAVE;
+        }
+#endif
+#endif
+        cfg.effect_id = effect_id;
+    }
+    cfg.hue   = rgb_matrix_get_hue();
+    cfg.sat   = rgb_matrix_get_sat();
+    cfg.val   = rgb_matrix_get_val();
+    cfg.speed = rgb_matrix_get_speed();
+
+    kb_led_config_set(&cfg);
 }
 #endif
 
@@ -411,6 +486,10 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
 #ifdef KEYBALL_AML_THRESHOLD_RUNTIME
             kb_aml_threshold = s.aml_threshold;
 #endif
+#ifdef OS_DETECTION_ENABLE
+            // OS自動判別の入れ替え設定を即時反映（トグルOFFにした場合は解除される）
+            kb_apply_os_swap(detected_host_os());
+#endif
             response[1] = KB_HID_STATUS_OK;
             break;
         }
@@ -497,7 +576,134 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             response[1] = KB_HID_STATUS_OK;
             break;
         }
+
 #endif // GESTURE_ENABLE
+
+        // 0x2A: ダブルフリック（方向別発動キー・時間窓・フリック判定しきい値・最大継続時間・有効/無効）を返す
+        // 応答: [cmd, up_hi,up_lo, down_hi,down_lo, left_hi,left_lo, right_hi,right_lo,
+        //        window_10ms, flick_threshold, max_duration_10ms, enable, status]
+        case KB_HID_CMD_GET_DFLICK: {
+            for (uint8_t i = 0; i < 4; i++) {
+                uint16_t kc         = kb_dflick_key_get(i);
+                response[1 + i * 2] = (kc >> 8) & 0xFF;
+                response[2 + i * 2] = kc & 0xFF;
+            }
+            response[9]  = (uint8_t)(kb_dflick_window_ms_get() / 10);
+            response[10] = kb_dflick_flick_threshold_get();
+            response[11] = (uint8_t)(kb_dflick_max_duration_ms_get() / 10);
+            response[12] = kb_dflick_enable_get() ? 1 : 0;
+            response[13] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x2B: ダブルフリック（方向別発動キー・時間窓・フリック判定しきい値・最大継続時間・有効/無効）を変更
+        // 要求: [cmd, up_hi,up_lo, down_hi,down_lo, left_hi,left_lo, right_hi,right_lo,
+        //        window_10ms, flick_threshold, max_duration_10ms, enable]
+        case KB_HID_CMD_SET_DFLICK: {
+            for (uint8_t i = 0; i < 4; i++) {
+                uint16_t kc = ((uint16_t)data[1 + i * 2] << 8) | data[2 + i * 2];
+                kb_dflick_key_set(i, kc);
+            }
+            kb_dflick_window_ms_set((uint16_t)data[9] * 10);
+            kb_dflick_flick_threshold_set(data[10]);
+            kb_dflick_max_duration_ms_set((uint16_t)data[11] * 10);
+            kb_dflick_enable_set(data[12] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x28: シェイク機能（発動キー・感度・反転回数・許容時間・有効/無効）を返す
+        // 応答: [cmd, key_hi, key_lo, threshold, reversals, run_max_10ms, enable, status]
+        case KB_HID_CMD_GET_SHAKE: {
+            uint16_t key = kb_shake_key_get();
+            response[1] = (key >> 8) & 0xFF;
+            response[2] = key & 0xFF;
+            response[3] = kb_shake_threshold_get();
+            response[4] = kb_shake_reversals_get();
+            response[5] = (uint8_t)(kb_shake_run_max_ms_get() / 10);
+            response[6] = kb_shake_enable_get() ? 1 : 0;
+            response[7] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x29: シェイク機能（発動キー・感度・反転回数・許容時間・有効/無効）を変更
+        // 要求: [cmd, key_hi, key_lo, threshold, reversals, run_max_10ms, enable]
+        case KB_HID_CMD_SET_SHAKE: {
+            uint16_t key = ((uint16_t)data[1] << 8) | data[2];
+            kb_shake_key_set(key);
+            kb_shake_threshold_set(data[3]);
+            kb_shake_reversals_set(data[4]);
+            kb_shake_run_max_ms_set((uint16_t)data[5] * 10);
+            kb_shake_enable_set(data[6] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+#ifdef COMBO_ENABLE
+        // 0x2C: 指定コンボスロット(0-7)の設定を返す
+        // 要求: [cmd, idx]
+        // 応答: [cmd, idx, key0_hi,key0_lo, key1_hi,key1_lo, key2_hi,key2_lo, key3_hi,key3_lo,
+        //        keycode_hi,keycode_lo, status]
+        case KB_HID_CMD_GET_COMBO: {
+            uint8_t         idx  = data[1];
+            kb_combo_slot_t slot = kb_combo_get(idx);
+            response[1] = idx;
+            for (uint8_t i = 0; i < KB_COMBO_MAX_KEYS; i++) {
+                response[2 + i * 2] = (slot.keys[i] >> 8) & 0xFF;
+                response[3 + i * 2] = slot.keys[i] & 0xFF;
+            }
+            response[10] = (slot.keycode >> 8) & 0xFF;
+            response[11] = slot.keycode & 0xFF;
+            response[12] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x2D: 指定コンボスロット(0-7)の設定を変更してEEPROMに保存
+        // 要求: [cmd, idx, key0_hi,key0_lo, key1_hi,key1_lo, key2_hi,key2_lo, key3_hi,key3_lo,
+        //        keycode_hi,keycode_lo]
+        case KB_HID_CMD_SET_COMBO: {
+            uint8_t         idx = data[1];
+            kb_combo_slot_t slot;
+            for (uint8_t i = 0; i < KB_COMBO_MAX_KEYS; i++) {
+                slot.keys[i] = ((uint16_t)data[2 + i * 2] << 8) | data[3 + i * 2];
+            }
+            slot.keycode = ((uint16_t)data[10] << 8) | data[11];
+            kb_combo_set(idx, &slot);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+#endif
+
+#ifdef OS_DETECTION_ENABLE
+        // 0x2E: OS自動判別で現在検出しているOS種別を返す
+        // 応答: [cmd, os, status]  os = 0:不明 1:Linux 2:Windows 3:macOS 4:iOS
+        case KB_HID_CMD_GET_OS: {
+            response[1] = (uint8_t)detected_host_os();
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+#endif
+
+        // 0x2F: DPIカーブ（トラックボールの動きの速さ→実際に送る速さの5点カーブ）を返す
+        // 応答: [cmd, enable, y0, y1, y2, y3, y4, status]
+        case KB_HID_CMD_GET_DPI_CURVE: {
+            const uint8_t *pts = kb_dpi_curve_points_get();
+            response[1] = kb_dpi_curve_enable_get() ? 1 : 0;
+            for (uint8_t i = 0; i < KB_DPI_CURVE_POINT_COUNT; i++) response[2 + i] = pts[i];
+            response[2 + KB_DPI_CURVE_POINT_COUNT] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x30: DPIカーブを変更してEEPROMに保存する
+        // 要求: [cmd, enable, y0, y1, y2, y3, y4]
+        case KB_HID_CMD_SET_DPI_CURVE: {
+            kb_dpi_curve_enable_set(data[1] != 0);
+            uint8_t pts[KB_DPI_CURVE_POINT_COUNT];
+            for (uint8_t i = 0; i < KB_DPI_CURVE_POINT_COUNT; i++) pts[i] = data[2 + i];
+            kb_dpi_curve_points_set(pts);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
 
         // 0x17: ファームウェアのバージョンを返す（全機種・全バージョン共通で応答）
         // 応答: [cmd, major, minor, patch, status]

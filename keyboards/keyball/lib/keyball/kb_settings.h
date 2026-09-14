@@ -53,6 +53,7 @@ typedef struct {
 #define KB_FLAG_SCROLL_INV_V     (1 << 4)  // 縦スクロール反転
 #define KB_FLAG_SCROLL_INV_H     (1 << 5)  // 横スクロール反転
 #define KB_FLAG_AML_DISABLE      (1 << 6)  // 自動マウスレイヤー無効（0=有効・後方互換）
+#define KB_FLAG_OS_AUTO_SWAP     (1 << 7)  // OS自動判別: Mac/iOS接続時にCmd(GUI)とCtrlを自動入れ替え（0=何もしない・既定）
 
 // EEPROMから読み込む（初回のみ; 以降はRAMキャッシュを返す）
 kb_settings_t kb_settings_get(void);
@@ -115,8 +116,9 @@ typedef struct {
 // レイヤー連動LEDテーブル(0x09E7-0x0A10)の直後、慣性スクロール設定(-0x0A18)の
 // さらに直後の空き領域。4モード×10バイト=40バイト（0x0A19-0x0A40）。
 // 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROM、0x0A42はKB_GESTURE_WAVE_SPEED_EEPROM、
-// 0x0A43はKB_GESTURE_WAVE_ENABLE_EEPROMで使用済み。次にここへ設定を追加する場合は
-// 0x0A44以降を使うこと。
+// 0x0A43はKB_GESTURE_WAVE_ENABLE_EEPROMで使用済み。さらに0x0A44-0x0A46はシェイク、
+// 0x0A47-0x0A50はダブルフリック、0x0A51-0x0A52は両者の有効/無効フラグの設定で
+// 使用済み（本ファイル末尾参照）。次にここへ設定を追加する場合は0x0A53以降を使うこと。
 #define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
 #define KB_GESTURE_MODE_ENTRY_SIZE   10
 
@@ -244,3 +246,145 @@ void    kb_scroll_inertia_strength_set(uint8_t v);
 // 速さでも発動する」ようになる。
 uint8_t kb_scroll_inertia_flick_mult_get(void);
 void    kb_scroll_inertia_flick_mult_set(uint8_t v);
+
+// ── シェイク機能（2026-09-10〜。トラックボールを振ると設定したキーを発動）──────
+// ジェスチャーモードの選択状態に関わらず常時判定する（「振る」動作は方向ジェスチャー
+// と混同しにくいため）。キー未設定(0、EEPROM未書込み時と同じ値)なら常に何もしない。
+// KB_GESTURE_MODE_TABLE_EEPROM(0x0A19-0x0A40)・KB_TRACKBALL_LAYERS_MAGIC_EEPROM(0x0A41)・
+// KB_GESTURE_WAVE_SPEED_EEPROM(0x0A42)・KB_GESTURE_WAVE_ENABLE_EEPROM(0x0A43)の直後。
+#define KB_SHAKE_KEY_EEPROM       0x0A44  // 発動キー（2バイト、0=未設定）
+#define KB_SHAKE_THRESHOLD_EEPROM 0x0A46  // 感度（1バイト。小さいほど敏感）
+#define KB_SHAKE_THRESHOLD_MIN     10
+#define KB_SHAKE_THRESHOLD_MAX     200
+#define KB_SHAKE_THRESHOLD_DEFAULT 60
+
+uint16_t kb_shake_key_get(void);
+void     kb_shake_key_set(uint16_t v);
+uint8_t  kb_shake_threshold_get(void);
+void     kb_shake_threshold_set(uint8_t v);
+
+// シェイク判定の厳しさ（2026-09-10〜。本人希望により今までkeymap.cにハード
+// コードしていた値をWeb UIから調整できるようにした。現状の既定値
+// （反転6回・700ms以内）を中心に、緩める方向・厳しくする方向の両方に余白を
+// 持たせている。KB_COMBO_EEPROM_BASE(0x0A54-0x0AA3、kb_combo.h参照)の直後。
+#define KB_SHAKE_REVERSALS_EEPROM  0x0AA4  // 発動に必要な反転回数(1バイト)
+#define KB_SHAKE_REVERSALS_MIN      2   // 1往復
+#define KB_SHAKE_REVERSALS_MAX      12  // 6往復
+#define KB_SHAKE_REVERSALS_DEFAULT  6   // 3往復（今までの固定値）
+
+#define KB_SHAKE_RUN_MAX_EEPROM    0x0AA5  // 反転が全て収まるべき時間の上限(1バイト、10ms単位)
+#define KB_SHAKE_RUN_MAX_MIN        10   // 100ms
+#define KB_SHAKE_RUN_MAX_MAX        200  // 2000ms
+#define KB_SHAKE_RUN_MAX_DEFAULT    70   // 700ms（今までの固定値）
+// 次に設定を追加する場合は0x0AA6以降を使うこと。
+
+uint8_t  kb_shake_reversals_get(void);
+void     kb_shake_reversals_set(uint8_t v);
+// 実際のms値を返す/受け取る（内部は10ms単位で保存）
+uint16_t kb_shake_run_max_ms_get(void);
+void     kb_shake_run_max_ms_set(uint16_t ms);
+
+// ── ダブルフリック（2026-09-10〜。同じ方向へ短時間で2回フリックすると発火）──
+// 2026-09-10、本人希望によりジェスチャーモード（GST_HOLD〜4キーやジェスチャー
+// レイヤー）とは完全に独立させ、通常のトラックボール操作（カーソル移動）中に
+// 動作するようにした。「動き始めてから止まるまで(streak)」を1つの塊として捉え、
+// streakが止まった瞬間に判定する（慣性スクロールのフリック検出=keyball.cの
+// keyball_scroll_inertia_should_applyと同じ考え方）。カーソルの動き自体は
+// 変更せず観測するだけなので、通常のマウス操作を妨げない。
+// KB_SHAKE_THRESHOLD_EEPROM(0x0A46)の直後。
+//
+// 2026-09-10、方向検知はstreak中の「ピーク速度」ではなく「streak全体の移動量
+// 合計」で判定する方式に変更した（ノイズに弱いピーク値方式より安定するため、
+// ジェスチャー機能の方向判定と同じ考え方に揃えた）。しきい値の意味も「ピーク
+// 速度」から「移動量合計」に変わったため、範囲・既定値をジェスチャーの発動
+// しきい値(KB_GESTURE_TH_*)と同じ基準に合わせている。
+#define KB_DFLICK_KEY_TABLE_EEPROM     0x0A47  // 方向ごとの発動キー(4×2バイト=8バイト。0=未設定)
+// 2026-09-11、本人が実機で詰めた値（感度30・時間窓500ms・動作時間上限420ms）を
+// 新しい既定値にし、それらを中心に調整範囲を組み直した。
+#define KB_DFLICK_WINDOW_EEPROM        0x0A4F  // 2回目のフリックを認識する時間の上限(1バイト、10ms単位)
+#define KB_DFLICK_WINDOW_MIN            20  // 200ms
+#define KB_DFLICK_WINDOW_MAX            80  // 800ms
+#define KB_DFLICK_WINDOW_DEFAULT        50  // 500ms
+#define KB_DFLICK_FLICK_THRESHOLD_EEPROM 0x0A50  // フリック判定のしきい値(streak全体の移動量合計。1バイト)
+#define KB_DFLICK_FLICK_THRESHOLD_MIN     5
+#define KB_DFLICK_FLICK_THRESHOLD_MAX     60
+#define KB_DFLICK_FLICK_THRESHOLD_DEFAULT 30
+
+// dir: 0上 1下 2左 3右（kb_gesture_mode_tのkey[]と同じ並び）
+uint16_t kb_dflick_key_get(uint8_t dir);
+void     kb_dflick_key_set(uint8_t dir, uint16_t v);
+// 実際のms値を返す/受け取る（内部は10ms単位で保存）
+uint16_t kb_dflick_window_ms_get(void);
+void     kb_dflick_window_ms_set(uint16_t ms);
+uint8_t  kb_dflick_flick_threshold_get(void);
+void     kb_dflick_flick_threshold_set(uint8_t v);
+
+// ── シェイク・ダブルフリックそれぞれの有効/無効（2026-09-10〜。既定: 両方有効）──
+// 2026-09-10、本人が「シェイクとダブルフリックのどちらが原因で動作しないのか
+// 切り分けたい」との要望で追加。キー未設定(0)でも実質無効になるが、キー設定を
+// 消さずに機能ごと止められるようにする。他の既定ONフラグ（kb_gesture_wave_enable
+// 等）と同じ「1のみ明示的なOFF、それ以外(未書込みの0x00含む)は既定のON」パターン。
+// KB_DFLICK_FLICK_THRESHOLD_EEPROM(0x0A50)の直後。
+#define KB_SHAKE_ENABLE_EEPROM  0x0A51
+#define KB_DFLICK_ENABLE_EEPROM 0x0A52
+
+// ダブルフリックの「フリックとみなす最大継続時間」（2026-09-10〜）。今まで
+// FLICK_MAX_DURATION_MSとしてkeymap.cにハードコードしていたが（120ms固定）、
+// 「感度・時間窓を一番緩くしても発火しない」という報告を受けて発覚: 実際の
+// トラックボールは指で弾いた後も慣性で転がり続けるため、実測の継続時間が
+// 120msを超えるケースがあり、他の設定をどれだけ緩めても無条件に弾かれていた
+// （Web UIから見えない・調整できない値だったため気づきにくかった）。これを
+// Web UIから調整できるようにした。
+// 2026-09-11、本人が実機で詰めた値(420ms)を既定値にし、中心に範囲を組み直した。
+#define KB_DFLICK_MAX_DURATION_EEPROM  0x0A53  // 最大継続時間(1バイト、10ms単位)
+#define KB_DFLICK_MAX_DURATION_MIN      15  // 150ms
+#define KB_DFLICK_MAX_DURATION_MAX      70  // 700ms
+#define KB_DFLICK_MAX_DURATION_DEFAULT  42  // 420ms
+// 0x0A54-0x0AA3(80バイト)はコンボ設定(kb_combo.h/c、KB_COMBO_EEPROM_BASE)、
+// 0x0AA4-0x0AA5はシェイク判定の厳しさ設定(本ファイル末尾参照)が使用済み。
+// 次にここへ設定を追加する場合は0x0AA6以降を使うこと。
+
+uint16_t kb_dflick_max_duration_ms_get(void);
+void     kb_dflick_max_duration_ms_set(uint16_t ms);
+
+bool kb_shake_enable_get(void);
+void kb_shake_enable_set(bool v);
+bool kb_dflick_enable_get(void);
+void kb_dflick_enable_set(bool v);
+
+// ── DPIカーブ（2026-09-11、本人希望で追加。同日、本人希望で5点→9点に増量）──
+// Photoshopのトーンカーブのように、トラックボールの「動きの速さ」に対する
+// 「実際に送る速さ」を折れ線グラフで自由に調整できる機能。
+// X軸（入力の速さ）は0-127に固定（点の位置はKB_DPI_CURVE_X参照）、
+// Y軸（出力の速さ）だけをEEPROMに保存する。既定値はY=X（対角線＝何も変えない）。
+// 有効時は既存の「加速度」設定(keyball_get_accel)より優先される
+// （keymap.cのkeyball_on_apply_motion_to_mouse_move参照）。
+#define KB_DPI_CURVE_POINT_COUNT 9
+extern const uint8_t KB_DPI_CURVE_X[KB_DPI_CURVE_POINT_COUNT];  // 各点のX座標（固定・変更不可）
+
+// 0x0A54-0x0AA3(80バイト)はコンボ設定、0x0AA4-0x0AA5はシェイク判定の厳しさ設定
+// (本ファイル前方参照)が使用済み。次にここへ設定を追加する場合は0x0AB1から。
+#define KB_DPI_CURVE_ENABLE_EEPROM 0x0AA6  // 有効/無効（1バイト。1=ON明示、それ以外(未書込み含む)=OFF既定）
+#define KB_DPI_CURVE_MAGIC_EEPROM  0x0AA7  // 出力の点が実際に保存済みかの目印(1バイト)
+// 2026-09-11、点数を5→9へ増やした際にマジックバイトの値も変更した（旧5点データを
+// 誤って9点として読み込み、末尾4点が未書込み領域の0x00＝出力0になって曲線が
+// 急落するのを防ぐため。値が変わっていれば「未保存」扱いになり既定のY=Xへ戻る）。
+#define KB_DPI_CURVE_MAGIC_VALUE   0xC6
+#define KB_DPI_CURVE_POINTS_EEPROM 0x0AA8  // 出力値9点（0x0AA8-0x0AB0、各1バイト、0-255）
+// 次にここへ設定を追加する場合は0x0AB1から。
+
+bool kb_dpi_curve_enable_get(void);
+void kb_dpi_curve_enable_set(bool v);
+
+// 出力の点を返す（要素数KB_DPI_CURVE_POINT_COUNTの内部バッファへのポインタ。
+// 呼び出し側で書き換えないこと）。未保存なら既定のY=X（KB_DPI_CURVE_Xと同じ値）を返す。
+const uint8_t *kb_dpi_curve_points_get(void);
+// 出力の点を保存する（points は要素数KB_DPI_CURVE_POINT_COUNTの配列）。
+void kb_dpi_curve_points_set(const uint8_t *points);
+
+// 5点を単調3次エルミート曲線（Fritsch-Carlson系、オーバーシュートしない滑らかな
+// 曲線）で結んだ、入力の速さ(0-127)ごとの出力値を並べたルックアップテーブルを返す
+// （要素数KB_DPI_CURVE_LUT_SIZE）。設定変更時にだけ計算し直すのでキャッシュされ、
+// 毎回のポインター移動処理では単純な配列参照だけで済む（keymap.c参照）。
+#define KB_DPI_CURVE_LUT_SIZE 128
+const uint8_t *kb_dpi_curve_lut_get(void);

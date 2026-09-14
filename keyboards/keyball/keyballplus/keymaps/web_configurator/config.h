@@ -58,11 +58,12 @@
 #define SPLIT_DETECTED_OS_ENABLE
 
 // ===== RGBLIGHT =====
-// LED総数を実際のハードウェア構成に合わせて上書き（右22 + 左24 = 46個）
+// LED総数を実際のハードウェア構成に合わせて上書き
+// （トラックボール側26 + 非搭載側29 = 55個。Keyball+は左右非対称）
 #undef RGBLIGHT_LED_COUNT
-#define RGBLIGHT_LED_COUNT 46
+#define RGBLIGHT_LED_COUNT 55
 #undef RGBLED_SPLIT
-#define RGBLED_SPLIT { 22, 24 }
+#define RGBLED_SPLIT { 26, 29 }
 
 // エフェクトのレパートリー。RP2040は容量制約がないため主要なものを一通り有効化。
 #define RGBLIGHT_EFFECT_BREATHING
@@ -86,11 +87,11 @@
 #define RGBLIGHT_LIMIT_VAL 150
 
 // ===== RGB_MATRIX（波紋演出のためRGBLIGHTから移行中。現在はLED物理位置の実測用暫定ビルド） =====
-// LED総数を実際のハードウェア構成に合わせて上書き（RGBLIGHTと同じく右22 + 左24 = 46個）
+// LED総数を実際のハードウェア構成に合わせて上書き（RGBLIGHTと同じく26+29=55個）
 #undef RGB_MATRIX_LED_COUNT
-#define RGB_MATRIX_LED_COUNT 46
+#define RGB_MATRIX_LED_COUNT 55
 #undef RGB_MATRIX_SPLIT
-#define RGB_MATRIX_SPLIT { 22, 24 }
+#define RGB_MATRIX_SPLIT { 26, 29 }
 // 自作エフェクト（LED_TEST診断・REACTIVE_KEYS）を有効化する
 #define RGB_MATRIX_CUSTOM_USER
 // キー入力に反応するエフェクト（REACTIVE_KEYS）に必要
