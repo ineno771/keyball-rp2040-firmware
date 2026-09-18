@@ -145,21 +145,37 @@ enum keyball_keycodes {
 
 typedef union {
     uint32_t raw;
+    // 2026-09-18判明・修正: 各ビットフィールドの宣言型がuint8_t中心でuint16_tが1つ
+    // 混在していたため、コンパイラが「その型のバイト境界をまたいでは詰めない」
+    // 前提で確保領域を割り当ててしまい（GCCのビットフィールドは、宣言型のサイズを
+    // 単位として、その単位の残りビット数に収まらないフィールドは次の単位の先頭から
+    // 確保する）、無駄なパディングが積み重なって構造体全体が32bit(=.rawのuint32_t)
+    // に収まらなくなっていた（実際に`sizeof(keyball_config_t) != sizeof(uint32_t)`に
+    // なっていたことを一時的な_Static_assertで実機確認済み）。結果、最後のフィールド
+    // であるmagicが.rawの4バイトの外側に飛び出し、c.magic=KEYBALL_CONFIG_MAGICと
+    // 代入しても.raw経由では常に0のまま保存される＝毎回「magic不一致」と誤判定されて
+    // 既定値へリセットされ続けるバグになっていた（本人報告「ファームウェアを書き直すと
+    // トラックボール設定がリセットされる」の根本原因）。全フィールドの宣言型をraw自体
+    // と同じuint32_tに統一し、単一の32bit確保単位内にすき間なく詰まるようにして解消した
+    // （合計ビット数は7+3+1+5+2+4+8=30bitで32bit以内に収まる）。
     struct {
-        uint8_t cpi : 7;
-        uint8_t sdiv : 3;  // scroll divider
+        uint32_t cpi : 7;
+        uint32_t sdiv : 3;  // scroll divider
 #ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
-        uint8_t amle : 1;  // automatic mouse layer enabled
-        uint16_t amlto : 5; // automatic mouse layer timeout
+        uint32_t amle : 1;  // automatic mouse layer enabled
+        uint32_t amlto : 5; // automatic mouse layer timeout
 #endif
 #if KEYBALL_SCROLLSNAP_ENABLE == 2
-        uint8_t ssnap : 2; // scroll snap mode
+        uint32_t ssnap : 2; // scroll snap mode
 #endif
-        uint8_t accel : 4; // pointer acceleration (0=off, 1-10)
-        uint8_t magic : 8; // レイアウト検証用（kb_settings.cと同じ仕組み）。
+        uint32_t accel : 4; // pointer acceleration (0=off, 1-10)
+        uint32_t magic : 8; // レイアウト検証用（kb_settings.cと同じ仕組み）。
                             // フィールドを追加・変更したら必ず値を変える。
     };
 } keyball_config_t;
+// 上記バグの再発防止用に恒久的に残す（ビットフィールドを増やす際、型を統一し忘れて
+// また32bitをはみ出すと、ここでビルドエラーとして即座に気づける）。
+_Static_assert(sizeof(keyball_config_t) == sizeof(uint32_t), "keyball_config_t bitfield layout does not fit in 32 bits (magic byte likely landing outside .raw)");
 
 // 単純な連番ではなく偶然一致しにくい値にする（kb_settings.cのMAGIC_VALUEと同様の考え方）
 #define KEYBALL_CONFIG_MAGIC 0x5B

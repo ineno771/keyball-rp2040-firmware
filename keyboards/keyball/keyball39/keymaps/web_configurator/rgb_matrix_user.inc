@@ -338,7 +338,8 @@ static bool TRACKBALL(effect_params_t* params) {
     }
 
     // 動きが止まってから元の色に戻るまでの時間。speedが大きいほど短く（キビキビ）なる
-    const uint16_t DECAY_MS = 900 - ((uint16_t)rgb_matrix_config.speed * 700 / 255);  // 200〜900ms
+    // （本人希望により、消えるのが早すぎたため大幅に延長: 200〜900ms → 500〜3000ms）
+    const uint16_t DECAY_MS = 3000 - ((uint16_t)rgb_matrix_config.speed * 2500 / 255);  // 500〜3000ms
     uint16_t       elapsed  = timer_elapsed(last_move_tick);
     uint8_t        glow     = (elapsed >= DECAY_MS) ? 0 : (uint8_t)((uint32_t)hold_speed * (DECAY_MS - elapsed) / DECAY_MS);
 
@@ -488,8 +489,18 @@ static bool ALTERNATING(effect_params_t* params) {
 // いく見た目にするため）。彩度はrgb_matrix_config.hsvの設定をそのまま使う。
 // アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
 // （RIPPLE・REACTIVE_KEYSと同じ扱い）。
-#define HEATMAP_INCREASE_STEP    32   // 1打鍵あたりの熱量増加
-#define HEATMAP_DECAY_INTERVAL_MS 25  // この間隔ごとに熱量を1ずつ下げる
+// 【2026-09-18】「どれだけのタイピングで赤くなるかの早さを調整したい」との要望で、
+// 1打鍵あたりの熱量増加を固定値(32)から、標準の「速度」スライダー(rgb_matrix_config.speed
+// 0-255)で可変にした。左に振るほど何度も打たないと赤くならず(MIN)、右に振るほど
+// 少ない打鍵ですぐ赤くなる(MAX)。他の一部エフェクト(REACTIVE_KEYS等)と違いHEATMAPは
+// 元々「速度」概念を使っていなかったため、Web UI側でも該当エフェクトIDをスライダー
+// 非表示リスト(LED_NO_SPEED_EFFECT_IDS)から外す対応を合わせて行っている。
+#define HEATMAP_INCREASE_MIN 4    // 速度スライダー最小(0)での1打鍵あたりの熱量増加
+#define HEATMAP_INCREASE_MAX 128  // 速度スライダー最大(255)での1打鍵あたりの熱量増加
+// 【2026-09-18】「もっと長く保持してほしい」との指摘で25→100msに変更（約4倍）。
+// 1打鍵分(熱量32)が冷めきるまでの時間は 32*25ms=800ms → 32*100ms=3.2秒、
+// フル加熱(255)からは 255*25ms≒6.4秒 → 255*100ms≒25.5秒になる。
+#define HEATMAP_DECAY_INTERVAL_MS 100  // この間隔ごとに熱量を1ずつ下げる
 static bool HEATMAP(effect_params_t* params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
 
@@ -502,6 +513,8 @@ static bool HEATMAP(effect_params_t* params) {
         heat_init = true;
     }
 
+    uint8_t increase_step = HEATMAP_INCREASE_MIN + (uint8_t)(((uint16_t)rgb_matrix_config.speed * (HEATMAP_INCREASE_MAX - HEATMAP_INCREASE_MIN)) / 255);
+
     // 新規ヒットのみ蓄熱する。g_last_hit_trackerは同じ押下がtick<=30の間、複数フレーム
     // に渡って観測され続けるため、「前回見た時よりtickが小さくなった＝新しい押下」の
     // 場合だけ加算することで二重加算を防いでいる（RIPPLE等と違い、蓄積値を扱うため
@@ -513,7 +526,7 @@ static bool HEATMAP(effect_params_t* params) {
         uint8_t idx = g_last_hit_tracker.index[j];
         if (idx >= RGB_MATRIX_LED_COUNT) continue;
         if (g_last_hit_tracker.tick[j] < heat_last_tick[idx]) {
-            heat[idx] = qadd8(heat[idx], HEATMAP_INCREASE_STEP);
+            heat[idx] = qadd8(heat[idx], increase_step);
         }
         heat_last_tick[idx] = g_last_hit_tracker.tick[j];
     }

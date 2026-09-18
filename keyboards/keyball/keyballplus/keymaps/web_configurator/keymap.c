@@ -483,6 +483,74 @@ bool process_detected_host_os_kb(os_variant_t os) {
 // （keyboard_post_init_user()から起動直後の初期反映のために呼ぶ）。
 static void kb_apply_layer_features(uint8_t hl);
 
+// 2026-09-18
+// Keyball+はトラックボールを左右どちらの基板にも実装できるリバーシブル設計
+// （本家keyball-plus-firmwareのkeyball_on_adjust_layout()参照。あちらはRGBLIGHTの
+// クリッピング範囲をkeyball.this_have_ball/that_have_ball（実際にPMW3360センサーを
+// 検出した結果）で都度計算しており、is_keyboard_left()（SPLIT_HAND_MATRIX_GRIDに
+// よる基板固有の配線特性で決まる値。トラックボールの有無とは無関係）に依存していない）。
+//
+// ところがこのキーマップには、is_keyboard_left()依存の前提が2箇所ある：
+//
+// (1) RGB_MATRIX: コア側のrgb_matrix_get_limits()/rgb_matrix_led_index()
+//     （quantum/rgb_matrix/rgb_matrix.c、weak関数ではないため上書き不可）が
+//     is_keyboard_left()とRGB_MATRIX_SPLITだけでハーフごとの描画範囲を固定的に
+//     決める仕組みのため、g_led_config（keyballplus.c。ボール搭載側=idx0-25と
+//     いう前提で作成済み）と整合させるには「ボール搭載側 = is_keyboard_left()が
+//     真」という前提が必要。→ is_keyboard_left()自体を下記のように上書きして解決。
+//
+// (2) g_led_config.matrix_co（quantum/matrix.cのthisHand = isLeftHand ?
+//     0 : MATRIX_ROWS_PER_HAND;によって、is_keyboard_left()=true側の物理スイッチが
+//     常にマトリクス行0-3、false側が行4-7に来る）は、「行0-3 = ボール搭載側の
+//     スイッチ」という前提で作られた固定テーブル（keyballplus.c）。この前提は
+//     ボールが本来の意味でのis_keyboard_left()=true側の基板にある場合しか
+//     成立しない。ボールがfalse側の基板にある場合、行0-3には実際には非搭載側の
+//     スイッチが来るため、g_led_config.matrix_coの行0-3/4-7を入れ替えないと
+//     キー反応系エフェクト（リップル等）の対応がズレる
+//     （2026-09-18、Pキーを押すとidx=8＝ボール側の行0列0のLEDが反応する不具合として
+//     発覚。matrix_coは`const`ではない通常のRAM上の構造体なので実行時に書き換え可能）。
+//
+// is_keyboard_left()はQMKコア(split_common)がweak関数として提供しており上書き
+// 可能。これを利用し、実際にボールを検出したこちら側を「左」として扱うよう
+// 差し替える。ただし起動直後・トラックボールセンサーの検出（keyboard_post_init_kb
+// のpmw3360_init()）が終わる前は、分割キーボード間の通信ネゴシエーションや
+// マトリクス結合（上記(2)のthisHand計算。起動時に一度だけis_keyboard_left()を
+// 読んでキャッシュし、以後は再取得しないためキー入力には影響しない）に基板本来の
+// 配線特性由来の値が必要なため、g_ball_probe_readyが立つ（＝post_initが完了し
+// this_have_ballが確定した）までは元の値をそのまま返す。
+static bool    g_ball_probe_ready = false;
+static int8_t  g_hw_is_left       = -1;  // 基板本来の配線特性由来の値（(2)のキャッシュと共有）
+extern bool is_keyboard_left_impl(void);
+
+bool is_keyboard_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    if (!g_ball_probe_ready) {
+        return (bool)g_hw_is_left;
+    }
+    return keyball.this_have_ball;
+}
+
+#ifdef RGB_MATRIX_ENABLE
+// 上記(2)の対処。「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側
+// だったか」を判定し、そうであればg_led_config.matrix_coの行0-3⇔4-7を入れ替える。
+// this_have_ball/g_hw_is_leftはどちらもこのハーフだけで完結する値のため、
+// 両ハーフが独立に同じ結論に達する（相方との通信は不要）。
+static void kb_fixup_led_matrix_rows_if_needed(void) {
+    bool ball_is_on_hw_left_side = keyball.this_have_ball ? (bool)g_hw_is_left : !(bool)g_hw_is_left;
+    if (ball_is_on_hw_left_side) return;  // g_led_configの前提通りなので何もしない
+
+    for (uint8_t r = 0; r < MATRIX_ROWS / 2; r++) {
+        for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+            uint8_t tmp                                  = g_led_config.matrix_co[r][c];
+            g_led_config.matrix_co[r][c]                 = g_led_config.matrix_co[r + MATRIX_ROWS / 2][c];
+            g_led_config.matrix_co[r + MATRIX_ROWS / 2][c] = tmp;
+        }
+    }
+}
+#endif
+
 void keyboard_post_init_user(void) {
 #ifdef CONSOLE_ENABLE
     // 2026-09-09、原因調査用の一時的なデバッグ出力（qmk consoleで確認）。
@@ -520,6 +588,14 @@ void keyboard_post_init_user(void) {
     // いれば正しく反映されるようにする（kb_apply_layer_features側のコメント参照）。
     kb_apply_layer_features(get_highest_layer(layer_state));
     (void)s;
+
+    // this_have_ballはここまでの処理（keyboard_post_init_kbでのpmw3360_init()）で
+    // 確定済みなので、g_led_config.matrix_coの行入れ替えが必要か判定・実行してから、
+    // 以降is_keyboard_left()をthis_have_ball基準に切り替える。
+#ifdef RGB_MATRIX_ENABLE
+    kb_fixup_led_matrix_rows_if_needed();
+#endif
+    g_ball_probe_ready = true;
 }
 
 uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
@@ -586,7 +662,6 @@ void matrix_scan_user(void) {
     // 外部から毎フレーム駆動する必要が無いため、この呼び出しはRGBLIGHT版のみでよい。
     keyball_seasonal_led_task();
 #endif
-
 }
 
 // スクロール方向の反転（EEPROM設定に応じて符号を反転）
@@ -636,7 +711,15 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
 
             kb_gesture_mode_t m    = kb_gesture_mode_get(gst_mode);
             uint16_t          kc   = m.key[dir];
-            bool              cont = (m.continuous >> dir) & 1;
+            // SCRL_TO/SCRL_MOはスクロールモードのON/OFFを反転させるトグル系キーで、
+            // 押すたびに状態が入れ替わる（=何度も撃つと結果が予測できない）。
+            // 「連続入力」はクールダウン無しで動いている間ずっと撃ち続けるため、
+            // これらに設定するとスクロールモードが偶奇不定で固定化してしまい、
+            // 他のレイヤーに移ってもレイヤー連動の値へ戻らなくなる不具合があった
+            // （本人からの報告: レイヤー2にスクロールを設定していないのにスクロール
+            // してしまう。別レイヤーのジェスチャーの連続入力をOFFにしたら直った）。
+            // そのためこの2キーだけは「連続入力」指定を無視し、常に単発扱いにする。
+            bool              cont = ((m.continuous >> dir) & 1) && kc != SCRL_TO && kc != SCRL_MO;
             if (kc) {
                 kb_fire_keycode(kc);
                 keyball_gesture_wave_trigger(dir);  // 未割当方向(kc==0)では発動させない
@@ -740,6 +823,7 @@ combo_t key_combos[KB_COMBO_SLOT_COUNT];
 
 #ifdef OLED_ENABLE
 #    include "lib/oledkit/oledkit.h"
+#    include "lib/oledkit/anim_frames.h"
 void oledkit_render_info_user(void) {
     keyball_oled_render_keyinfo();
     keyball_oled_render_ballinfo();
@@ -747,69 +831,18 @@ void oledkit_render_info_user(void) {
 }
 
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
-// LEDエフェクトが「クリスマス」の間だけ、ロゴの代わりにクリスマスツリーが
-// 煌めくアニメーションを表示する（2026-09-10、本人リクエスト）。
+// LEDエフェクトが季節イベント（クリスマス/ハロウィン/イースター/トゥインクル）の間だけ、
+// ロゴの代わりに対応する全画面アニメーションを表示する（2026-09-17、本人リクエスト）。
 //
-// 最初は文字コマ(16列×4行、1コマ約6x8px)で描いていたが、解像度が粗すぎて
-// 「ショボい」と指摘された。OLEDは実際には128x32pxを1px単位で自由に描ける
-// ため、oled_write_pixel()で直接ピクセル単位のツリーに描き直した。
-// ツリー本体は3段の三角(モミの木のギザギザ)を頂点を重ねて描き、各段の
-// 斜め輪郭線のみ(塗りつぶさない)にすることで内側を暗いままにし、そこに
-// 散りばめた飾り(オーナメント)の点だけが浮かび上がって見えるようにしている。
-// 飾りは毎フレーム oled_clear() で一旦消してから「今回点灯すべき飾りだけ」を
-// 描き直す方式にし、個別の位相(idxに大きめの奇数19を掛けてtickをずらす)で
-// バラバラに点滅させることで、本物のイルミネーションのような煌めきにしている。
-typedef struct {
-    uint8_t x, y;
-} tree_point_t;
-
-static void render_christmas_tree_oled(void) {
-    const uint8_t  CX      = 64;  // ツリー中心のx座標(画面128pxの中央)
-    const uint16_t TICK_MS = 150; // 煌めきが切り替わる間隔
-
-    oled_clear();
-
-    // 3段の三角(頂点を少し重ねて段々のモミの木に見せる): {apex_y, base_y, max_half_width}
-    static const uint8_t tiers[3][3] = {
-        {3, 11, 9},
-        {9, 18, 14},
-        {16, 25, 19},
-    };
-    for (uint8_t i = 0; i < 3; i++) {
-        uint8_t apex_y = tiers[i][0], base_y = tiers[i][1], max_hw = tiers[i][2];
-        for (uint8_t y = apex_y; y <= base_y; y++) {
-            uint8_t hw = (uint8_t)(((uint16_t)max_hw * (y - apex_y) + (base_y - apex_y) / 2) / (base_y - apex_y));
-            oled_write_pixel(CX - hw, y, true);
-            oled_write_pixel(CX + hw, y, true);
-        }
-    }
-
-    // 頂上の星(常時点灯、十字型)
-    oled_write_pixel(CX, 1, true);
-    oled_write_pixel(CX - 1, 2, true);
-    oled_write_pixel(CX, 2, true);
-    oled_write_pixel(CX + 1, 2, true);
-    oled_write_pixel(CX, 3, true);
-
-    // 幹
-    for (uint8_t y = 25; y <= 29; y++) {
-        for (uint8_t x = CX - 4; x <= CX + 4; x++) {
-            oled_write_pixel(x, y, true);
-        }
-    }
-
-    // 飾り(オーナメント): 各段の三角の内側に収まる位置を選んで点在させる
-    static const tree_point_t ornaments[] = {
-        {CX - 2, 7}, {CX + 2, 7}, {CX - 4, 13}, {CX + 4, 13}, {CX - 7, 16}, {CX + 7, 16}, {CX - 5, 20}, {CX + 5, 20}, {CX - 10, 23}, {CX + 10, 23}, {CX, 23},
-    };
-    uint16_t tick = timer_read() / TICK_MS;
-    for (uint8_t i = 0; i < sizeof(ornaments) / sizeof(ornaments[0]); i++) {
-        uint16_t phase = (uint16_t)((tick + (uint16_t)i * 19) % 7);
-        if (phase < 3) {
-            oled_write_pixel(ornaments[i].x, ornaments[i].y, true);
-            oled_write_pixel(ornaments[i].x + 1, ornaments[i].y, true);
-        }
-    }
+// 以前はクリスマスのみ oled_write_pixel() で手描きしたツリーを表示していたが、
+// 本人が用意した実写ベースのコマ送り画像（90フレーム/15fps/6秒ループ、
+// 128x32の全画面を1枚のバイト列にしたもの）に差し替えた。frames[idx]を
+// そのままフレームバッファへ転送するだけなので、手描きより滑らかで、
+// 4エフェクト分を同じ処理で共通化できる。
+static void render_seasonal_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES]) {
+    uint8_t idx = (uint8_t)((timer_read() / KB_ANIM_FRAME_MS) % KB_ANIM_FRAME_COUNT);
+    oled_set_cursor(0, 0);
+    oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
 }
 #endif
 
@@ -824,38 +857,55 @@ static void render_christmas_tree_oled(void) {
 // 元の静止表示の余白(BASE_MARGIN=2文字)を中心に±AMPLITUDE文字とし、
 // 画面右端をはみ出さない範囲に収めている。
 void oledkit_render_logo_user(void) {
+    static bool was_handled = false;
+    bool        handled     = false;
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
-    if (rgb_matrix_get_mode() == RGB_MATRIX_CUSTOM_CHRISTMAS) {
-        render_christmas_tree_oled();
-        return;
+    switch (rgb_matrix_get_mode()) {
+        case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(anim_xmas); handled = true; break;
+        case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(anim_hallow); handled = true; break;
+        case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(anim_easter); handled = true; break;
+        case RGB_MATRIX_CUSTOM_TWINKLE: render_seasonal_anim_oled(anim_twinkle); handled = true; break;
+        default: break;
     }
 #endif
 
-    const uint16_t PERIOD_MS   = 3200;  // 左右1往復にかかる時間
-    const int8_t   AMPLITUDE   = 2;     // 左右に振れる最大文字数
-    const uint8_t  BASE_MARGIN = 2;     // 元の静止表示と同じ基準余白
-    uint16_t       t           = timer_read() % PERIOD_MS;
-
-    // -AMPLITUDE 〜 +AMPLITUDE を往復する三角波
-    int16_t swing;
-    if (t < PERIOD_MS / 2) {
-        swing = (int16_t)(-AMPLITUDE + (int32_t)t * (2 * AMPLITUDE) / (PERIOD_MS / 2));
-    } else {
-        swing = (int16_t)(AMPLITUDE - (int32_t)(t - PERIOD_MS / 2) * (2 * AMPLITUDE) / (PERIOD_MS / 2));
+    // 季節アニメーション→ロゴに戻った直後だけ、画面全体を一旦クリアする（本人指摘・
+    // 2026-09-18）。下のロゴ描画はoled_write_charで3行分(24px)しか触れないため、
+    // アニメーションが使っていた4段目(下8px、128x32のうち一度も上書きされない領域)に
+    // 前のフレームの残像が残ったままになっていた。切り替わった瞬間の1回だけで済むよう
+    // 毎フレームではなくwas_handledとの比較で遷移エッジのみ検出している。
+    if (!handled && was_handled) {
+        oled_clear();
     }
-    uint8_t margin = (uint8_t)(BASE_MARGIN + swing);
+    was_handled = handled;
 
-    char ch = 0x80;
-    for (int y = 0; y < 3; y++) {
-        for (uint8_t i = 0; i < margin; i++) {
-            oled_write_char(' ', false);
+    if (!handled) {
+        const uint16_t PERIOD_MS   = 3200;  // 左右1往復にかかる時間
+        const int8_t   AMPLITUDE   = 2;     // 左右に振れる最大文字数
+        const uint8_t  BASE_MARGIN = 2;     // 元の静止表示と同じ基準余白
+        uint16_t       t           = timer_read() % PERIOD_MS;
+
+        // -AMPLITUDE 〜 +AMPLITUDE を往復する三角波
+        int16_t swing;
+        if (t < PERIOD_MS / 2) {
+            swing = (int16_t)(-AMPLITUDE + (int32_t)t * (2 * AMPLITUDE) / (PERIOD_MS / 2));
+        } else {
+            swing = (int16_t)(AMPLITUDE - (int32_t)(t - PERIOD_MS / 2) * (2 * AMPLITUDE) / (PERIOD_MS / 2));
         }
-        for (int x = 0; x < 16; x++) {
-            oled_write_char(ch, false);
-            ch++;
+        uint8_t margin = (uint8_t)(BASE_MARGIN + swing);
+
+        char ch = 0x80;
+        for (int y = 0; y < 3; y++) {
+            for (uint8_t i = 0; i < margin; i++) {
+                oled_write_char(' ', false);
+            }
+            for (int x = 0; x < 16; x++) {
+                oled_write_char(ch, false);
+                ch++;
+            }
+            // 余白の変化で前フレームの残像が残らないよう、行の残りを消す
+            oled_advance_page(true);
         }
-        // 余白の変化で前フレームの残像が残らないよう、行の残りを消す
-        oled_advance_page(true);
     }
 }
 #endif

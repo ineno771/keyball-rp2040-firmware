@@ -60,6 +60,14 @@
 // ===== RGBLIGHT =====
 // LED総数を実際のハードウェア構成に合わせて上書き
 // （トラックボール側26 + 非搭載側29 = 55個。Keyball+は左右非対称）
+//
+// 2026-09-18: このキーマップ（web_configurator）は「ボール搭載側 = is_keyboard_left()
+// が真になる基板」で組み立てたユニット（ボール右手・デフォルト構成）専用。
+// この前提が成立しない「ボール左手」ユニット向けには、g_led_config/keymaps[]は
+// 一切変更せずis_keyboard_left()の判定結果だけを反転させる別キーマップ
+// web_configurator_leftballを用意した（詳細はそちらのkeymap.cのコメント参照）。
+// 両ユニットが同じg_led_config/keymaps[]/RGB_MATRIX_SPLITを共有できるよう、
+// このファイルの値は変更しないこと。
 #undef RGBLIGHT_LED_COUNT
 #define RGBLIGHT_LED_COUNT 55
 #undef RGBLED_SPLIT

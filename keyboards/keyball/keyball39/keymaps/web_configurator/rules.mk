@@ -51,3 +51,7 @@ SRC += lib/keyball/kb_settings.c
 SRC += lib/keyball/kb_macro.c
 SRC += lib/keyball/kb_combo.c
 SRC += lib/keyball/td_config.c
+
+# LEDエフェクト連動OLEDアニメーション（クリスマス/ハロウィン/イースター/トゥインクル、
+# 2026-09-17本人リクエスト）のフレームデータ本体。
+SRC += lib/oledkit/anim_frames.c

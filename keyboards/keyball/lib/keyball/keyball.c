@@ -230,12 +230,34 @@ typedef struct {
 // なる不具合の再発防止）。
 #define KEYBALL_SCROLL_INERTIA_MAX_COAST_MS 3000
 
+// 減衰の時定数（フレーム数、呼び出し周期はKEYBALL_REPORTMOUSE_INTERVAL≒8ms＝125Hz）。
+// strength(0-KB_SCROLL_INERTIA_STRENGTH_MAX)からこの範囲へ線形に写像する。
+// 【注意】以前は「decay_num = 200 + strength*55/254」という、decay_num
+// （0.78〜0.996）自体をstrengthに対して線形に変化させる式だった。しかし
+// 減衰の体感速度はdecay_numそのものではなく「256に対する近さ」に対して
+// 指数的に効くため、この式だとstrength=128（デフォルト）でも半減期が
+// 125Hz換算で約8フレーム＝60ms強しかなく、スライダーの下から中間あたり
+// まではほぼ「即座に止まる」にしか感じられず、上位ごく一部でしか
+// 「徐々に弱まる」効果が出ていなかった（本人指摘で発覚）。
+// 代わりに時定数(フレーム数)をstrengthに対して線形にし、decay_numは
+// gap=256/tauから逆算する（decay_num=256-gapならおよそ1/e減衰までtau
+// フレームかかる）ことで、スライダーのどの位置でも変化が均等に体感できる
+// ようにする。
+// 【2026-09-17再調整】上記の減衰時間の修正とは別に、「最大設定でも強すぎる」との
+// 指摘を受け、スライダーの最大値をKB_SCROLL_INERTIA_STRENGTH_MAX=254→15に
+// 縮小するのに合わせて、最大時の時定数自体も180→80フレームに下げ、初速の
+// ブースト倍率も4→3に下げた（下のKEYBALL_SCROLL_INERTIA_BOOST）。実機未確認の
+// 見積もり値なので、まだ強い/弱いと感じたらこの2つの数値を再調整すること。
+#define KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES 2   // strength=0: ほぼ即座に止まる
+#define KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES 80  // strength=最大: 長めに滑る（約640msの時定数）
+
 // 滑走開始時、観測したピーク速度にかけるブースト倍率。生の値をそのまま
 // 使うと分周値(base_div)に対して小さすぎて、実際に目に見えるスクロールに
 // ならないことがあったため（h/vが±1にしかならず、体感できるほど動かない）。
 // 倍率が大きいほど「同じ速さで弾いても遠くまで/大きく」滑るようになり、かつ
 // ピーク速度そのものに比例するため、ボールを速く回すほど強く滑るようになる。
-#define KEYBALL_SCROLL_INERTIA_BOOST 4
+// （strengthの値に関わらず一律にかかる。2026-09-17: 4→3に下げた）
+#define KEYBALL_SCROLL_INERTIA_BOOST 3
 
 // 慣性を発動させる最低速度（base_divの倍数）。ゆっくり意図的にスクロール
 // している時は発動させたくない、速く弾いた時だけ発動してほしい、という
@@ -361,7 +383,11 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
                 inertia->coast_started_at = timer_read32();
             }
             inertia->coasting = true;
-            uint16_t decay_num = 200 + (uint16_t)kb_scroll_inertia_strength_get() * 55 / KB_SCROLL_INERTIA_STRENGTH_MAX;
+            uint16_t tau = KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES +
+                           (uint16_t)((uint32_t)kb_scroll_inertia_strength_get() *
+                                      (KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES - KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES) /
+                                      KB_SCROLL_INERTIA_STRENGTH_MAX);
+            uint16_t decay_num = 256 - (256 / tau);
             m->x               = add16(m->x, inertia->vx);
             m->y               = add16(m->y, inertia->vy);
             inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
@@ -639,7 +665,23 @@ static void rpc_get_motion_invoke(void) {
 }
 
 static void rpc_set_cpi_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    keyball_set_cpi(*(keyball_cpi_t *)in_data);
+    keyball_cpi_t cpi = *(keyball_cpi_t *)in_data;
+    keyball_set_cpi(cpi);
+
+    // 2026-09-18: このハーフ（スレーブ）自身のEEPROMにもCPIを保存する。
+    // 従来はマスターから届いたCPIをRAM(and this_have_ball==trueならセンサー本体)に
+    // 反映するだけで、スレーブ自身のEEPROMには一切書き込んでいなかった。CPI等
+    // (keyball_config_t)はマスター側のkeyboard_post_init_kb()でmagic不一致なら
+    // 既定値へリセット＆保存する仕組みになっているため、ボール側(この環境では
+    // スレーブ)を単独で再起動・再書き込みするたびにmagicが一致せず既定CPIへ戻り、
+    // マスターが次にCPIを送り直すまでの間、実際のCPIが設定値とズレてしまっていた
+    // （本人報告:「ファームウェアを書き直すとトラックボール設定がリセットされる」）。
+    // ここでスレーブ自身のEEPROMにも書いておくことで、スレーブ単独の再起動後も
+    // マスターからの再送を待たずに正しいCPIで起動できるようにする。
+    keyball_config_t c = {.raw = eeconfig_read_kb()};
+    c.cpi   = cpi;
+    c.magic = KEYBALL_CONFIG_MAGIC;
+    eeconfig_update_kb(c.raw);
 }
 
 static void rpc_set_cpi_invoke(void) {

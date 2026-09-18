@@ -220,8 +220,11 @@ void            kb_led_config_set(const kb_led_config_t *cfg);
 #define KB_SCROLL_INERTIA_ENABLE_EEPROM    0x0A16  // 有効/無効（1バイト）
 #define KB_SCROLL_INERTIA_STRENGTH_EEPROM  0x0A17  // 強さ（1バイト）
 #define KB_SCROLL_INERTIA_STRENGTH_MIN     0
-#define KB_SCROLL_INERTIA_STRENGTH_MAX     254
-#define KB_SCROLL_INERTIA_STRENGTH_DEFAULT 128
+// 【注意】以前は254だったが、実機で最大値付近が強すぎるとの指摘があり15に縮小した
+// （2026-09-17）。減衰の時定数計算(keyball.cのkeyball_on_apply_motion_to_mouse_scroll)
+// はこの値に対して比例計算しているため、ここを変えるだけで自動的に追従する。
+#define KB_SCROLL_INERTIA_STRENGTH_MAX     15
+#define KB_SCROLL_INERTIA_STRENGTH_DEFAULT 8
 
 // 発動しきい値の倍率。実際の倍率は「値÷10」（例: 25なら2.5倍）。0.1刻みまで
 // 表現できるよう10倍した整数で保持する。下限を0にしていないのは、0倍だと
@@ -371,7 +374,8 @@ extern const uint8_t KB_DPI_CURVE_X[KB_DPI_CURVE_POINT_COUNT];  // 各点のX座
 // 急落するのを防ぐため。値が変わっていれば「未保存」扱いになり既定のY=Xへ戻る）。
 #define KB_DPI_CURVE_MAGIC_VALUE   0xC6
 #define KB_DPI_CURVE_POINTS_EEPROM 0x0AA8  // 出力値9点（0x0AA8-0x0AB0、各1バイト、0-255）
-// 次にここへ設定を追加する場合は0x0AB1から。
+// 次にここへ設定を追加する場合は0x0AB1から（一度「加速度スクロール」用に割り当てた
+// が、機能自体を削除したため未使用に戻っている。実機に書き込まれたことは無い）。
 
 bool kb_dpi_curve_enable_get(void);
 void kb_dpi_curve_enable_set(bool v);
