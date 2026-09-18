@@ -63,6 +63,7 @@
 - **`kb_fire_keycode`→`kb_synth_keyevent`への置き換え（アーキテクチャ変更・2026-09-11）**: 上記OSM調査の過程で、`register_code16()`/`tap_code16()`が`QK_MODS`帯以外の量子キーコード（TG/MO/OSL/OSM等）を下位バイトへ切り詰めてしまう構造的な問題を発見。QMK本体のCombo機能（`process_combo.c`）が採用している「合成した`keyrecord_t`を`action_tapping_process()`に渡し、`process_action()`のフルパイプラインを通す」方式を採用し、キーマップ内でキーを合成発火する箇所（Tap Danceのタップ/ホールド/ダブルタップ確定処理など）を全てこの方式に統一。今後同種のキーコードを追加しても同じバグが起きない設計になった。**副作用として`COMBO_ENABLE=yes`を維持することがコード上必須になった**（`keyrecord_t.keycode`フィールドがこのビルドフラグ下でしかコンパイルされないため、`keymap.c`に明示的な`#error`ガードを追加済み）。
 - **キーコード全数監査で発覚した死んだキーコードの削除（2026-09-11）**: `RGB_MODE_PLAIN`等(`0x782B`-`0x7834`)が現行QMKには処理コードが一切存在しない死んだレガシーエイリアスだと判明（`~/qmk_firmware/quantum/`を全数grepして確認）。Web UIのキーパレットから削除。**「Keyball39 デフォルト」プリセットがこの死んだ値を直接使っていた**ため、UG_PREV/UG_NEXTによる循環に置き換え（ユーザー選択、輝度調整キーへの変更は本人希望により見送り・元に戻し済み）。`via39_*`等の「本家キーマップの機械的変換」プリセットは意図的に無変更（本家の実際のQMKバージョン挙動が不明なため）。
 - **レイヤー0連動機能が起動直後に反映されない不具合の修正（2026-09-11、実機確認まだ）**: スクロールモード/超低速モード/ジェスチャーモードとレイヤーを連動させる設定を**レイヤー0（ベースレイヤー）に対して**行うと、起動直後は反映されない不具合があった。原因は連動判定処理が`layer_state_set_user()`（実際にレイヤーが変化した時だけ呼ばれるQMK標準コールバック）の中にしかなく、起動直後はレイヤー0にいるにも関わらず一度もレイヤー変化イベントが起きないため判定が実行されないこと。判定処理を`kb_apply_layer_features()`として切り出し、`keyboard_post_init_user()`（起動時）からも呼ぶように修正。レイヤー1以上への連動では偶然症状が出ていなかった（レイヤー切り替えで必ず一度はコールバックが呼ばれるため）。
+  - **2026-09-17再報告**: 本人から「ジェスチャーなどがレイヤー0に設定しても機能しない」と改めて報告があった。ソースコードを再確認したところ、上記の修正（`kb_apply_layer_features`の2箇所呼び出し）・`kb_settings.c`の`all_zero`判定（layer=0だが実際にキーが設定されているモードは正しく`all_zero=false`になり、レイヤー0のまま保持される）ともに現在のソースに正しく存在しており、コード上は問題を再現できなかった。この項目は元々「実機確認まだ」のままだった（BOOTSEL手動書き込みの手間もあり、2026-09-11の修正が一度も実機に書き込まれていない可能性が高い）。今回のセッションで作った最新のuf2（慣性スクロール減衰修正等と同じビルド）にはこの修正が含まれているはずなので、**まずそれを書き込み直してから再確認してもらうこと**。それでも直らない場合は、`web_configurator`キーマップに既に仕込んである`kb_debug: apply_layer_features hl=...gst_layer_mode=...`のqmk console出力を取得して原因を切り分ける（`CONSOLE_ENABLE=yes`で既にビルドされている）。
 - **LED「Val」「Sat」等（UG_\*キー）に関する不具合一式の修正（2026-09-11、実機確認まだ）**: 「通常（レイヤー0）のLED設定」は独自EEPROM領域`kb_led_config`が正としてWeb UI経由で管理されているが、標準のUG_TOG/UG_HUE+/UG_VALU等のキーはQMK本体（`process_underglow.c`）が直接`rgb_matrix`本体の状態を書き換えるだけで、`kb_led_config`には一切反映されない別系統だったことが根本原因。
   - 何もしないと、次回起動時や、レイヤー連動LED／ジェスチャーウェーブのオーバーライド表示が終わるタイミングで`kb_led_config`の古い値が強制的に書き戻され、UG_\*キーでの変更が消えてしまう。→ UG_\*キー押下後に`rgb_matrix`本体の実際の状態を`kb_led_config`へ同期する`kb_led_config_sync_from_rgb_matrix()`を追加（`post_process_record_user`から呼び出し）。
   - ジェスチャーウェーブは**モード（エフェクト種別）だけ**を一時的にウェーブへ強制切り替えており、色相・彩度・明るさには一切触れない設計だと判明。当初は「オーバーライド中は全項目同期しない」ガードにしていたため、ウェーブが頻発する状況（レイヤー0ジェスチャー等でボールを転がし続ける）でSat等の変更がしばしば同期されずに消えていた。→ モードだけをウェーブ中スキップし、色相・彩度・明るさ・速度は常に同期するよう修正。
@@ -115,6 +116,154 @@
   - **`rgb_matrix_user.inc`のハーフ判定境界値を22→26に変更**（3箇所）。ただし`is_keyboard_left()`で左右のどちらがトラックボール側かを固定的に仮定しているのはKeyball39からの既存の制約で、Keyball+でも未検証のまま引き継いでいる。
   - **ビルド確認のみ完了**（`qmk compile -kb keyball/keyballplus -km web_configurator`成功、`.uf2`生成確認済み）。**実機での書き込み・動作確認はまだ行っていない**（Keyball+のRP2040実機が本人の手元に到着してから実施）。
   - コミット・GitHubへのpushは完了済み（本人の許可を得て実施、コミット`4737cf4`）。ただしLED配線順確定（本項目、2026-09-14）による`keyballplus.c`の更新はこの後さらに別途コミットが必要。
+- [ ] **【調査中・未解決】スクロールレイヤーOFFのレイヤーでもスクロール動作が残る不具合（本人報告、Keyball+ RP2040実機）**:
+  レイヤー2に「スクロールレイヤー」を設定していないのに、レイヤー2でトラックボールを動かすとスクロール動作になってしまう。
+  本人いわく「別レイヤーに登録していたジェスチャーの“連続入力”をOFFにしたら直った気がする」とのこと。
+  - **確認済みで除外できた仮説**:
+    1. そのジェスチャー方向にSCRL_TO/SCRL_MO（スクロール切替系キー）を割り当てていた → **否定**（通常キー・文字/矢印/メディアキー等を割り当てていた）
+    2. スクロールレイヤーとジェスチャーレイヤーが同じ番号で競合していた → **否定**（Web UI側の仕様として、スクロールレイヤーとジェスチャーレイヤーは同じ番号に重複設定できない）
+    3. 自動マウスレイヤー(AML)が有効で、その飛び先レイヤーがジェスチャーレイヤーと一致して干渉していた → **否定**（本人はAML自体を無効にしている）
+  - **未確定のまま残っている調査の方向性**:
+    - `pointing_device_task_user()`（`keymap.c`のジェスチャー処理）は、ジェスチャー中に`mouse_report.x`/`.y`は0にリセットしているが、**`.h`/`.v`（スクロール量）は一度もリセットしていない**（クールダウン中の早期returnも、ジェスチャー処理末尾のreturnも同様）。何らかの理由で`keyball.scroll_mode`がtrueのままジェスチャーが有効なレイヤーに入った場合、`motion_to_mouse()`（`lib/keyball/keyball.c`側、ジェスチャーの存在を知らない）が生成した`.h`/`.v`がジェスチャー処理をすり抜けてホストにそのまま届いてしまう可能性がある。これ自体がバグかどうか、今回の報告と直接関係するかは未検証。
+    - `keyball_scroll_inertia_should_apply()`（スクロール慣性機能）は、`keyball.scroll_mode`がfalseに戻った後も「まだ滑走中(coasting)」なら`motion_to_mouse()`をスクロール側の関数に振り向け続ける仕組みになっている。レイヤー切り替え時の`keyball_set_scroll_mode()`はこの慣性状態をリセットしない（ON→OFF時は意図的にリセットしない設計）。ジェスチャーの「連続入力」との関連性は未確認だが、机上調査だけでは因果関係を特定しきれなかった。
+    - `kb_apply_layer_features()`はレイヤー遷移(`layer_state_set_user`)の瞬間にしか`keyball_set_scroll_mode()`を再計算しないため、何らかの経路で`keyball.scroll_mode`が一度でも誤った値になると、次に実際のレイヤー遷移が起きるまでその誤りが残り得る構造になっている（自己修復しない）。
+  - **本人が試した対処と保留事項**: `qmk console`によるログ取得（`hl`/`scroll_layer`/`scroll_mode`/`gst_layer_mode`/`gst_manual_mode`を毎フレーム出力するデバッグprintfが`keymap.c`に既に仕込んであり、`web_configurator`キーマップは`CONSOLE_ENABLE=yes`でビルドされているためすぐ見られるはず）は「一旦見送る」とのことで、次回以降に持ち越し。OLED表示（`Ball:`行のh/v値、`Layer:`行のレイヤービット）を目視する代替案も未実施。
+  - **未コミットの副産物（今回のセッションで実施済み・ビルド確認済み）**: 上記調査中に見つけた別の潜在バグとして、`SCRL_TO`/`SCRL_MO`（スクロール切替系のトグル/モーメンタリキー）をジェスチャー方向に割り当てて「連続入力」をONにすると、クールダウン無しで何度もトグルが撃たれて`keyball.scroll_mode`が偶奇不定になる問題を発見し、この2キーだけ連続入力を無視して単発扱いにするガードを`keyball39`/`keyballplus`両方の`keymaps/web_configurator/keymap.c`に追加済み（`git status`で確認可能、未コミット）。**ただしこれは今回の本人報告の直接の原因ではないことが判明済み**（本人はジェスチャーにスクロール系キーを割り当てていない）。単独では正しい防御的修正なので活かす方向だが、コミットするかどうかは本題の不具合原因が分かってから判断すること。
+  - **次回セッションでの進め方（提案）**: (1) 本人にqmk console等でのログ取得を依頼できるか再確認、または(2) 再現条件をもう少し詳しく聞く（例: レイヤー2に入る直前に必ずそのジェスチャーレイヤーを経由しているか、レイヤー2への遷移はモーメンタリかトグルか、スクロール慣性機能は有効か、など）。
+
+### 2026-09-17: トラックボールリアクティブLED延長・慣性スクロール減衰式の見直し・加速度スクロールの追加と削除（`keyball39`/`keyballplus`両方、ビルド確認のみ・実機未確認・未コミット）
+- [x] **トラックボールリアクティブLED（`rgb_matrix_user.inc`のTRACKBALLエフェクト）の減衰時間を延長**: 動きが止まってから元の色に戻るまでの時間が短すぎる（200〜900ms）と指摘があり、500〜3000msに延長（`DECAY_MS`の計算式）。
+- [x] **「加速度スクロール」機能を追加した後、本人の判断で全面削除**: 一度は`kb_scroll_accel_get/set`（EEPROM `0x0AB1`）・HIDコマンド`0x31`/`0x32`・`keyball_on_apply_motion_to_mouse_scroll`冒頭の適用ロジックとして実装・ビルド確認までしたが、実機での確認前に「やっぱり不要」と判断されたため完全に削除した。EEPROMアドレス`0x0AB1`は未使用に戻っている（実機に書き込まれたことは一度も無いため、マイグレーション等の考慮は不要）。Web UI側（`scrollAccel`関連の全コード）も合わせて削除済み。
+- [x] **慣性スクロールの減衰式を修正（重要な設計変更）**: 「徐々に速度が弱まらない」という指摘があり原因を特定した。旧式`decay_num = 200 + strength*55/254`は、`decay_num`という数値自体をstrengthに対して線形に変化させていたが、体感される減衰の速さは`decay_num`が256にどれだけ近いか（256との差=gap）に対して指数的に効くため、strength=128（デフォルト）でも呼び出し周期125Hz換算の半減期が約60msしかなく、スライダーの下から中間まではほぼ「即座に止まる」にしか感じられず、上位のごく一部でしか「徐々に弱まる」効果が出ていなかった。修正後は、減衰の時定数（フレーム数）をstrengthに対して線形にし（`KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES`=2〜`KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES`=180）、そこから`decay_num = 256 - 256/tau`を逆算する方式にした。これによりスライダーのどの位置でも変化が均等に体感できるようになったはず（`keyball.c`の`keyball_on_apply_motion_to_mouse_scroll`内、慣性の減衰処理部分）。**実機での体感確認はまだ行っていない**。次回、実際にスライダーを動かしながら「弾いた後の滑り方」が滑らかに感じられるか確認すること。
+- 上記すべて`qmk compile`成功（keyball39・keyballplus両方）。コミットはまだ実施していない（本人の明確な許可待ち）。
+
+### 2026-09-17（続き）: 慣性スクロールの最大強度を縮小（本人指摘「現状強すぎ」）
+- [ ] **`KB_SCROLL_INERTIA_STRENGTH_MAX`を254→15、`DEFAULT`を128→8に変更**（`kb_settings.h`）。合わせて減衰の時定数上限`KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES`を180→80フレーム、初速ブースト倍率`KEYBALL_SCROLL_INERTIA_BOOST`を4→3に下げた（`keyball.c`）。単にスライダーの見た目の最大値を変えるだけでは（tau計算がstrength/MAXの比で決まるため）体感の強さは変わらないので、実際に上限の強さ自体も下げている。**実機未確認の見積もり値**。まだ強い/弱いと感じたらこの2つの数値（TAU_MAX_FRAMES・BOOST）を再調整すること。
+- `qmk compile`成功（keyball39・keyballplus両方）。コミットはまだ実施していない。
+
+### 2026-09-17（続き2）: LEDエフェクト連動OLEDアニメーション（クリスマス/ハロウィン/イースター/トゥインクル）を実写フレームに差し替え
+- 本人が`~/Downloads/frames/`に、4シーン分（xmas/hallow/easter/twinkle）×90フレームのコマ送り画像を用意（各フレームは128x32のOLED全画面を1枚のバイト列(512byte, SSD1306ページ形式)にした`keyball_anim.c`として提供済み）。「クリスマス、ハロウィン、イースター、トゥインクルに紐づけてOLEDアニメーションを設定してほしい。それ以外はKeyballロゴのアニメーションのままでいい」との依頼。
+- [x] **フレームデータを`keyboards/keyball/lib/oledkit/anim_frames.c`/`.h`として追加**: 提供された`keyball_anim.c`を配置し、`static`を外してextern参照できるようにした上で`anim_frames.h`（`KB_ANIM_FRAME_COUNT=90`, `KB_ANIM_FRAME_BYTES=512`, `KB_ANIM_FRAME_MS=67`(15fps)を定義）を用意。両keymapの`rules.mk`に`SRC += lib/oledkit/anim_frames.c`を追加してビルド対象化。
+- [x] **`keymap.c`（`keyball39`/`keyballplus`両方）の`oledkit_render_logo_user()`を書き換え**: 以前はクリスマスのときだけ`oled_write_pixel()`で手描きしたツリー（`render_christmas_tree_oled()`）を表示していたが、これを削除し、共通ヘルパー`render_seasonal_anim_oled(frames)`（`oled_set_cursor(0,0)`→`oled_write_raw_P()`で該当フレームを全画面転送するだけ）に統一。`rgb_matrix_get_mode()`を見て`RGB_MATRIX_CUSTOM_CHRISTMAS/HALLOWEEN/EASTER/TWINKLE`の4種類をそれぞれ対応するアニメーションへ、それ以外（無指定時のデフォルト等）は既存の「ロゴが左右にゆらゆら揺れる」表示へフォールバックする。これは**スレーブ側OLED限定**（従来通り。マスター側は引き続きキー情報/ボール情報/レイヤー情報を表示）。
+- サイズ: フレームデータ4シーン×90枚×512byte ＝ 約180KB（PROGMEM／RP2040の2MBフラッシュに対して十分小さい）。
+- `nm`で`anim_xmas`/`anim_hallow`/`anim_easter`/`anim_twinkle`/`render_seasonal_anim_oled`が両ターゲットのビルド済み`.elf`に実際にリンクされていることを確認済み。
+- `qmk compile`成功（keyball39・keyballplus両方）。**実機での見た目確認はまだ**。コミットはまだ実施していない。
+
+### 2026-09-17（続き3）: 季節アニメーションが実機で反映されない報告 → 原因切り分け用デバッグ表示を追加
+- 本人が両ハーフに書き込み、エフェクトも設定したが「アニメーションが反映されていない」と報告。ボール側をスレーブとして使う構成とのこと。
+- コード上は以下を確認済みで、いずれもシロだった: (1)フレームデータをPythonでデコードして目視確認→クリスマスツリー・イースターのうさぎ等、正しく描けている。(2)OLEDは128x32(512byte)がQMKの既定値で、config.hにも明示的な上書きは無くこの既定のまま→フレームデータの前提と一致。(3)`RGB_MATRIX_SPLIT`が定義されているため、QMK標準機構でmaster→slaveへ`rgb_matrix_config`(モード含む)が自動同期される設計になっている（`quantum/split_common/transactions.c`）。
+- 残る有力候補は「スレーブ側で`rgb_matrix_get_mode()`が実際に見ている値がおかしい（同期が効いていない等）」ため、`qmk console`を使わずスレーブ側OLED画面上だけで確認できるよう、`oledkit_render_logo_user()`の左上に常時「M{0/1} e{現在のmode} x{クリスマスのmode番号} h{ハロウィンのmode番号}」を重ね書きする一時デバッグ表示を追加（`keyball39`/`keyballplus`両方の`keymap.c`）。原因特定後に削除すること。
+- `qmk compile`成功（keyball39・keyballplus両方）。**本人に両ハーフへ書き込み直してもらい、スレーブ側（本人環境ではボール側）画面左上の数値を報告してもらうのが次のアクション**。
+
+### 2026-09-17（続き4）: 上記デバッグの結果、原因判明・解決（実機確認済み）
+- 本人が書き込み直した結果、画面に`M 0 e14 x10 h12`と表示された。`M 0`＝スレーブとして正しく認識、`e14`＝現在のLEDモード番号（この時点ではクリスマスではなく「トゥインクル」を選択していた。エフェクト定義順から逆算するとTWINKLE=14と一致）。`x10`＝クリスマスの番号、`h12`＝ハロウィンの番号。
+- 本人にデバッグ文字の背後を確認してもらったところ「トゥインクルのアニメが見えている」と確認が取れた。**つまりコード自体は最初から正しく動いており、実機で見えていなかったのは以前（`render_christmas_tree_oled`があった頃）の古い`.uf2`を書き込み直していたことが原因**だった（一度「以前作成した手書きのアニメーションが見えている」という報告があり、これが古いバイナリを使っていた決定的な証拠だった。今回作った`.uf2`を`nm`で調べても`render_christmas_tree_oled`は存在しないため）。
+- [x] デバッグ用の一時コード（左上への`M../e../x../h..`重ね書き、`oled_write_u8_2d`ヘルパー）を削除し、`oledkit_render_logo_user()`を最終形に整理（`handled`フラグで分岐、4エフェクト→対応アニメーション、それ以外→ゆらゆら揺れるロゴ、のみのシンプルな形）。
+- `qmk compile`成功（keyball39・keyballplus両方）。**機能自体は実機確認済み・完了**。コミットはまだ実施していない。
+
+### 2026-09-17（続き5）: 季節アニメーション→ロゴ復帰時に前フレームの残像が残るバグを修正
+- 本人から「アニメーションのエフェクトに設定した後にKeyballのロゴのアニメーションに戻すと、ロゴの周りに前のアニメーションの残骸のようなものが表示されたままになっている」と報告。
+- **原因**: ロゴ表示（`oledkit_render_logo_user()`内、揺れるロゴを描く部分）は`oled_write_char`で3行分（24px）しか描画しておらず、OLED全体（32px＝4段）のうち一番下の4段目（8px分）には一度も書き込まない。従来はこの4段目が常に空（未使用）だったため問題化しなかったが、季節アニメーションは`oled_write_raw_P`で画面全体512byteを毎フレーム書き込むため、この4段目にもアニメーションの絵が描かれる。アニメーション→ロゴに切り替わった瞬間、ロゴ側はこの4段目を一切触らないため、前のアニメーションの最後のフレームがそのまま画面下部に残り続けていた。
+- [x] **修正**: `oledkit_render_logo_user()`に`static bool was_handled`を追加し、「直前フレームはアニメーション表示だったが今回はロゴ表示」という遷移の瞬間だけ`oled_clear()`を呼ぶようにした（`keyball39`/`keyballplus`両方の`keymap.c`）。毎フレームクリアすると勾配のあるI2C転送量が増えるため、遷移エッジ1回だけに限定している。
+- `qmk compile`成功（keyball39・keyballplus両方）。**実機での確認はまだ**（次回本人に書き込み直してもらい確認）。
+
+### 2026-09-18: タイピングヒートマップ(HEATMAP)のLED保持時間を延長
+- 本人「タイピングヒートマップのLEDの保持時間をもっと長くして欲しいです」との要望。
+- [x] `HEATMAP_DECAY_INTERVAL_MS`を25→100msに変更（`rgb_matrix_user.inc`、keyball39/keyballplus両方）。熱量1減るごとの間隔を約4倍にしたので、1打鍵分（熱量32）が冷めるまでの時間は0.8秒→3.2秒、フル加熱(255)からは約6.4秒→約25.5秒になる。加算量(`HEATMAP_INCREASE_STEP`=32)は変更していない。
+- `qmk compile`成功（keyball39・keyballplus両方）。**実機での体感確認はまだ**。長すぎる/短すぎると感じたら`HEATMAP_DECAY_INTERVAL_MS`の値を再調整すること。
+
+### 2026-09-18（続き）: タイピングヒートマップ「赤くなる早さ」を調整可能に
+- 本人「タイピングヒートマップのどれだけのタイピングで赤くなるかの早さ調整をできるようにしてください」との要望。
+- [x] **新規EEPROM等を追加せず、既存の「速度」スライダー(`rgb_matrix_config.speed`、標準RGB_MATRIX機能で元々全エフェクト共通で同期・永続化されている値)を転用**した。`HEATMAP()`内で1打鍵あたりの熱量増加を固定値32ではなく`HEATMAP_INCREASE_MIN(4)`〜`HEATMAP_INCREASE_MAX(128)`の範囲でspeedから線形計算するよう変更（`rgb_matrix_user.inc`、keyball39/keyballplus両方）。速度を右に振るほど少ない打鍵数で赤くなる。
+- [x] Web UI側（`keyball-configurator`）: `LED_NO_SPEED_EFFECT_IDS`からタイピングヒートマップ(15)を除外し、LED設定画面でこのエフェクト選択時に「速度」スライダーが表示されるようにした（`src/lib/protocol.ts`）。ビルド確認・`rp2040-dev`プレビューへデプロイ済み。
+- `qmk compile`成功（keyball39・keyballplus両方）。**実機での確認はまだ**。
+
+### 2026-09-18（続き2）: 「ファームウェアを書き直すとトラックボール設定がリセットされる」原因調査・修正
+- 本人「ファームウェアを書き直すとトラックボール設定がリセットされますが保持しておくことはできますか？」。ヒアリングの結果「ボール動作に関する設定（CPI等）だけがリセットされ、キーマップやLED設定は保持される」と判明。ボール側をスレーブとして使用している環境。
+- **調査で分かったこと**:
+  - RP2040のwear-leveling EEPROMはフラッシュ末尾8KBという、ファーム本体とは別領域に置かれる。実際にビルドした`.uf2`を直接パースして確認したところ、書き込みブロックは`0x10000000`〜`0x1003E700`付近（約254KB）にとどまり、EEPROM領域（末尾、2MB品なら`0x101FE000`付近）には一切到達していない。**つまり通常のUF2書き込みではEEPROM自体は消えない**。
+  - `kb_settings.h`（コンボ・ジェスチャー・LED・慣性スクロール・DPIカーブ等、独自アドレス方式の設定）のアドレス配置も確認したが重複無し。
+  - 一方、CPI（と`accel`/`sdiv`/オートマウス等）はQMK標準の`eeconfig_read_kb()`/`eeconfig_update_kb()`（`keyball_config_t`、`KEYBALL_CONFIG_MAGIC`で保護）という**別系統**で管理されている。
+  - **根本原因**: `KEYBALL_SET_CPI`のRPCハンドラ（`rpc_set_cpi_handler`、スレーブ側で受信）は、届いたCPIを`keyball_set_cpi()`でRAM（and`this_have_ball`ならセンサー本体）へ反映するだけで、**スレーブ自身のEEPROMには一度も書き込んでいなかった**。CPIの真の永続化先はマスター側の`eeconfig_read_kb/update_kb`のみで、スレーブは常にマスターからのRPC送信に依存していた。ところが`keyboard_post_init_kb()`はマスター・スレーブ両方で無条件に実行され、スレーブ自身のEEPROM上の`keyball_config_t.magic`が一致しなければ（RP2040は未書込み領域が0x00になるため、スレーブ側では常に不一致＝毎回）即座に既定値へリセット＆保存してしまう。結果、**ボール側（スレーブ）を単独で再起動・再書き込みするたびに一旦既定CPIへ戻り、マスターが次に（`cpi_changed`経由で）CPIを再送してくるまでの間、実際のCPIが設定値とズレていた**。同じ`keyball_config_t`内の`accel`/`sdiv`等は移動量処理自体がマスター側で完結するため実害なし（＝「ボール動作の一部だけリセットされる」という報告と一致）。
+- [x] **修正**: `rpc_set_cpi_handler()`（`lib/keyball/keyball.c`）で、`keyball_set_cpi()`に加えて、そのハーフ自身の`eeconfig_read_kb/update_kb`にもCPIとmagicを書き込むようにした。これにより、一度でもマスターからCPIを受け取った後は、スレーブ単独の再起動・再書き込み後もマスターからの再送を待たずに正しいCPIで起動できる（UF2書き込み自体はEEPROMを消さないため、この修正を書き込んだ後は永続的に直る）。`lib/keyball/`は両機種共通なので`keyball39`/`keyballplus`両方に自動的に反映される。
+- `qmk compile`成功（keyball39・keyballplus両方）。**実機での確認はまだ**（本人に両ハーフ書き込み直してもらい、その後の単独リセット・再起動でCPIが保持されるか確認すること）。
+
+### 2026-09-18（続き3）: 上記修正後も「Web UI上のCPI表示がリセットされる」と再報告 → デバッグ出力追加
+- 本人にスレーブ単独再起動で確認してもらったが「しばらく待っても同様」とのこと。さらにヒアリングしたところ、判断根拠は**Keyball LinkのWeb UIに表示されるCPIの数値**（＝USB接続されているマスター側の`eeconfig_read_kb()`を直接読んでいる`KB_HID_CMD_GET_TRACKBALL`の応答）であり、USBは常にボール無し側（マスター）に挿しているとのこと。
+- これは前回の修正（スレーブ側の永続化）が対象にしていた問題とは**別**で、**マスター自身の`eeconfig_read_kb()`が書き込むたびにリセットされている**ことを意味する。アーキテクチャ上（UF2書き込みはEEPROM領域を消さない・`EECONFIG_MAGIC_NUMBER`はQMKコアの固定値0xFEE3・`nvm_eeconfig_read/update_kb`も通常のeeprom_read/update_dword）は説明がつかず、これ以上は静的なコード読みだけでは原因を特定できなかった。
+- [x] **原因切り分け用デバッグ出力を追加**（`CONSOLE_ENABLE`、マスターはUSB接続されているため`qmk console`で直接確認できる。前回のOLEDの件と違いこちらは切り分けが効くはず）:
+  - `keyboard_post_init_kb()`冒頭: `is_keyboard_master`・`eeconfig_is_enabled()`・読み出したraw値・magicバイトを出力。magic不一致で既定値リセットが発生した場合はその旨と直前のcpi値も出力。
+  - `KB_HID_CMD_GET_TRACKBALL`: Web UIからの問い合わせのたびに、読み出したraw/cpi/magicを出力。
+  - `KB_HID_CMD_SET_TRACKBALL`: Web UIから変更を保存するたびに、書き込んだ値と直後の読み直し結果（readback）を出力。
+- `qmk compile`成功（keyball39）。`strings`で上記デバッグ文字列がビルド済み`.elf`に実際に含まれることを確認済み。
+- **次のアクション**: 本人に`qmk console`を起動した状態で、(1)CPIをWeb UIで一度設定・保存、(2)その直後の`SET_TRACKBALL`ログのreadback値を確認、(3)ファームウェアを書き込み直す、(4)起動直後の`keyboard_post_init_kb`ログ（raw/magic/mismatchの有無）を確認、(5)Web UIを開いた瞬間の`GET_TRACKBALL`ログを確認、という流れで一連のログを取得してもらうこと。これで「そもそも書き込みが効いていないのか」「書き込み後の読み出し時点で既に化けているのか」「起動時のmagicチェックで毎回リセットされているのか」を確定できる。
+
+### 2026-09-18（続き4）: 実機ログで確定した衝撃の事実 → `eeconfig_read_kb()`自体がreflash後に完全ゼロで返ってくる
+- 本人からログ取得結果: reflash前の`SET_TRACKBALL`では`raw=0x02000606 cpi=6 magic=0x00`（書き込み・読み直しとも一致、セッション内では正常）。ところがreflash後、最初に開いたKeyball Linkの`GET_TRACKBALL`では**`raw=0x00000000 cpi=0 magic=0x00`**と、完全にゼロへ戻っていた。
+- **これで「マスター自身のEEPROM上のCPI永続化データが、UF2書き込み後に消えている」ことが実機ログで確定した。** アーキテクチャ的な調査（UF2はwear-leveling領域を書き換えない・`EECONFIG_MAGIC_NUMBER`はQMKコア固定値0xFEE3・`eeprom_core_t`は機能フラグに関係なく常に同一レイアウト・`eeprom_update_dword`もbyte書き込みと同じ`eeprom_write_block`経由・wear leveling層の書き込みはRAMキャッシュのみでなく毎回backing storeへappendされる設計）では、どれも「なぜ消えるか」を説明できていない。
+- **謎なのは、magicが元から`0x00`（本来`0x5B`のはず）だったこと。** `keyboard_post_init_kb()`はmagic不一致を検知したら`c.magic = KEYBALL_CONFIG_MAGIC; eeconfig_update_kb(c.raw);`で修復・保存するはずだが、それが機能していないように見える。前回仕込んだ起動直後の即時デバッグ出力は、`qmk console`の再接続がUSB列挙に間に合わず取得できなかった（"Console Disconnected"→"Console Connected"の間に流れてしまった）。
+- [x] **起動直後の即時出力をやめ、`housekeeping_task_kb()`から起動3秒後を起点に3秒おき・最大5回、CPI関連EEPROM状態（`eeconfig_is_enabled()`・raw・cpi・magic）を出し直すよう変更**（`keyball.c`）。`qmk console`の再接続が間に合うはずのタイミングまで遅らせることで、起動直後の状態を確実に捕捉する狙い。`strings`で新しいデバッグ文字列がビルド済み`.elf`に含まれることを確認済み。
+- `qmk compile`成功（keyball39のみ。keyballplusは未ビルド、必要になれば追従する）。
+- **次のアクション**: 本人にこの新ビルドを書き込み直してもらい、起動後3〜15秒の間に出る`kb_debug: [1]`〜`[5]`のログ（特に`eeconfig_enabled`の値）を共有してもらうこと。これで「`eeconfig_is_enabled()`がそもそもfalseなのか」「trueなのにmagicが直っていないのか」を確定できる。
+
+### 2026-09-18（続き5）: `eeconfig_enabled=1`なのにmagicが直らないことが確定 → 起動直後の書き込み自体を検証するデバッグ追加
+- 本人からログ: `eeconfig_enabled=1`（常にtrue）にも関わらず、起動から3/6/9/12/15秒後のいずれの時点でも`raw=0x00000000 magic=0x00`のまま。`keyboard_post_init_kb()`のmagic不一致検知時リセット処理（`c.magic=KEYBALL_CONFIG_MAGIC; eeconfig_update_kb(c.raw);`）が実行されていれば、この時点で`magic=0x5B`になっているはずだが、15秒経っても直っていない。
+- また、本人から「トラックボール動作設定のタブ内保存ボタンを削除し右上の保存ボタンへ統合する指示をしたが、それがうまく機能していないのでは」との指摘があった。`TrackballSettings.tsx`（スライダーは`onPointerUp`で即`onChange`→`App.tsx`の`handleTrackballChange`→`setTrackball()`→`hid.ts`が`SET_TRACKBALL`を即送信）・`kb_hid.c`（`KB_HID_CMD_SET_TRACKBALL`は受信時に即`eeconfig_update_kb()`）を追った限り、この統合自体はコード上問題なく、右上保存ボタン（`CMD_SAVE`、実体は`eeconfig_update_kb(eeconfig_read_kb())`という自己再書き込みのみ）とは独立に、スライダー操作のたびに即座にEEPROM書き込みが走る設計になっている。Web UI側の統合は原因ではないと判断。
+- [x] **`keyboard_post_init_kb()`内のmagic不一致リセット処理が「実行されたか」「実行直後の読み直しで実際に反映されたか」を記録し、起動3秒後からの遅延デバッグ出力で後から報告できるようにした**（ファイル冒頭に`g_boot_dbg`という一時構造体を追加。即時printfはqmk consoleの再接続に間に合わないため、記録だけ超早期に行い、報告は`housekeeping_task_kb`の遅延出力の1回目に相乗りさせる）。`strings`で新しい`kb_debug: [boot] ...`文字列がビルド済み`.elf`に含まれることを確認済み。
+- `qmk compile`成功（keyball39）。
+- **次のアクション**: 本人にこの新ビルドを書き込み直してもらい、`kb_debug: [1]`の直後に1回だけ出る`kb_debug: [boot] eeconfig_enabled_at_boot=... raw_at_boot=... did_reset=... wrote_raw=... readback_after_reset=...`を共有してもらうこと。`did_reset=1`なのに`readback_after_reset`が`wrote_raw`と食い違っていれば「書き込みが早すぎて反映されない」系の問題、`did_reset=0`（＝起動時点で既にmagicが一致していた＝矛盾）ならまた別の原因を疑う必要がある。
+
+### 2026-09-18（続き6）: 根本原因確定・修正完了 — `keyball_config_t`のビットフィールド型混在バグ
+- ログ結果: `did_reset=1`（リセット分岐は実行された）にも関わらず、`wrote_raw=0x00000000`（＝`c.magic = KEYBALL_CONFIG_MAGIC`を代入した直後の`c.raw`が0のまま）。**「書き込みが効かない」のではなく、「書き込む値自体が最初からおかしい」**ことが判明。
+- **`_Static_assert(sizeof(keyball_config_t) == sizeof(uint32_t), ...)`を`keyball.h`に一時的に追加してビルドしたところ、実際にビルドエラーで失敗**＝`keyball_config_t`（ビットフィールドの共用体）のサイズが4バイトに収まっていないことが実機ではなくコンパイラレベルで確定した。
+- **根本原因**: `keyball_config_t`のビットフィールドは`cpi:7`から`magic:8`まで合計30bitで、本来32bit(uint32_t)に余裕で収まるはずだった。ところが各フィールドの宣言型が`uint8_t`中心で`amlto`だけ`uint16_t`と混在しており、GCCのビットフィールド確保規則（宣言型のサイズを「確保単位」とし、その単位の残りビット数に収まらないフィールドは次の単位の先頭から確保し、単位をまたいで詰めない）により、`cpi`→`sdiv`→`amle`→`amlto`→`ssnap`→`accel`→`magic`の並びで無駄なパディングが積み重なり、**構造体全体の実サイズが4バイトを超えていた**。結果、最後のフィールドである`magic`が`.raw`（明示的に`uint32_t`と宣言されている）の4バイトの外側に配置され、`c.magic = KEYBALL_CONFIG_MAGIC`と代入しても`.raw`（＝実際にEEPROMへ書き込まれる値）には一切反映されなかった。これにより`keyboard_post_init_kb()`の「magic不一致なら既定値へリセット」処理が**永久に自己修復できない**状態になっており、`SET_TRACKBALL`/`SET_ACCEL`でCPI自体（先頭に近いフィールドなので.raw内には収まっていた）は正しく書き込めていたが、その`.raw`を毎回の起動時`eeconfig_is_enabled()`チェック自体は通っても、`magic`だけが常に0＝不一致と判定され続け、**起動のたびにCPI等が強制的に既定値へリセットされていた**。これが「ファームウェアを書き直すとトラックボール設定がリセットされる」の真の原因（reflashそのものはEEPROMを一切破壊していなかった）。
+- [x] **修正**: `keyball_config_t`の全ビットフィールドの宣言型を`.raw`と同じ`uint32_t`に統一（`keyball.h`）。単一の32bit確保単位内に隙間なく詰まるようになり、`_Static_assert(sizeof(keyball_config_t) == sizeof(uint32_t), ...)`が通ることを確認。この assert は再発防止のため恒久的にコードへ残した。
+- [x] 原因切り分け用に追加していた一時デバッグ出力（`keyball.c`の`g_boot_dbg`構造体・`housekeeping_task_kb`の遅延printf・`kb_hid.c`の`GET/SET_TRACKBALL`ログ）はすべて削除し、コードを最終形に整理した。
+- `qmk compile`成功（keyball39・keyballplus両方。`keyball.h`は共通ライブラリなので両機種に自動反映）。**実機での最終確認はまだ**（本人に両ハーフ書き込み直してもらい、CPI設定→複数回の書き込み直し・再起動を経ても値が保持され続けるか確認すること）。
+- **2026-09-18、実機確認完了**: 本人より「設定は保持されているようです。」と確認あり。クローズ。
+
+### 2026-09-18（続き7）: 「Keyball+を左手にして組み立てるとLEDが一部つかない」調査・修正
+- 症状: トラックボールを左手側に実装して組み立てたKeyball+ユニットで、非搭載側の一部LED（本人申告「27,28,29番」）が常に消灯する。
+- **調査1（誤り、後で訂正）**: 当初「もう1台の正常機（ボール右手・デフォルト構成）と物理配線が違う個体差では」「ハード不良では」という仮説を立てたが、本人から「以前の同様の症状もソフトが問題だった」「目視で異常は見られない」との指摘を受け、ソフトウェア側の調査を継続。
+- **決定打**: Keyball Linkの「LED位置実測（開発用）」機能（`SettingsTab.tsx`）でグローバルLEDインデックス27,28,29を直接指定点灯させたところ、非搭載側ではなく**ボール側のLEDが光る**ことを確認（本人申告）。これで「範囲の描画漏れ」ではなく「範囲の割り当て自体が入れ替わっている」ことが分かった。
+  - この検証用に`ledCount`（LED位置実測パネルの上限）が接続機種によらず常に46固定（Keyball39用）になっており、Keyball+の55個に対応していないバグも発見・修正（`App.tsx`。`state.model === 'keyballplus'`のとき55を渡すよう修正）。
+- **根本原因の特定**: `keymap.c`に一時的な`dprintf`（`is_keyboard_left()`・`keyball.this_have_ball`・`keyball.that_have_ball`・`RGB_MATRIX_SPLIT`の値を出力）を追加し`qmk console`で確認したところ、`is_left=0 this_ball=1 that_ball=0 split=[26,29]`という結果を得た。
+  - QMKコア（`quantum/split_common/split_util.c`）を確認した結果、`is_keyboard_left()`は`SPLIT_HAND_MATRIX_GRID`（`F6, B5`のマトリクス交点の電気的読み取り）で決まる、**トラックボール搭載の有無とは完全に無関係な、基板固有の配線特性**であることが判明。「どちらの物理基板にボールを実装するか」は組み立て時の選択次第であり、`is_keyboard_left()`の結果と必ずしも一致しない。
+  - `g_led_config`（`keyballplus.c`）・`keymaps[]`配列（`keymap.c`）は、いずれも「ボール搭載側 = `is_keyboard_left()`が真になる基板」という前提で作られている。さらにQMKコア（`quantum/split_common/matrix.c`の`thisHand = isLeftHand ? 0 : MATRIX_ROWS_PER_HAND;`）・`quantum/rgb_matrix/rgb_matrix.c`の`rgb_matrix_get_limits()`（`is_keyboard_left()`と`RGB_MATRIX_SPLIT`で範囲をクランプ、常に`is_keyboard_left()=true`側が下位範囲[0, split[0])・false側が上位範囲[split[0], total)を担当する構造）を確認し、この前提は**`RGB_MATRIX_SPLIT`の値をどう変えても、`is_keyboard_left()=true`側が常に「LEDインデックスの低い方（=ボール側として設計された範囲）」を受け持つ構造上の制約**であることが分かった。つまり、ボールが`is_keyboard_left()=false`側の基板に実装されている場合、`RGB_MATRIX_SPLIT`の値をどう調整しても、g_led_configの前提（ボール=低位範囲）と実際の物理配置（ボール=高位範囲を受け持つ側）は食い違ったままになる。
+  - 実際、`{26,29}`のままだと非搭載側の受け持ち範囲`[0,26)`が非搭載側の実LED数29個より3個少なく、末尾3個（27,28,29番）が永久に描画されず消灯。一方ボール側の受け持ち範囲`[26,55)`はボール側の実LED数26個より3個多く、余った3個は非搭載側のデータを誤って表示していた。
+  - **一度`RGB_MATRIX_SPLIT`をボード既定値`{29,26}`に戻して試したが、これは「LEDが漏れなく点灯する」ことは解決するものの、`g_led_config`/`keymaps[]`の行0-3(ボール)⇔4-7(非搭載)の対応関係そのものは直らないため、リップル等キー反応系エフェクトの対応が引き続きズレる**ことが実機で確認された（「今まで光っていなかった箇所が光りっぱなし」「他の箇所もおかしい」と報告）。
+- **最終的な修正方針**: 本人確認の結果、既存の「ボール右手・デフォルト構成」機も同じ`web_configurator`キーマップを使っており、`g_led_config`/`keymaps[]`を書き換えるとそちらが壊れる。そのため：
+  1. `web_configurator`（既存・ボール右手用）は`RGB_MATRIX_SPLIT`/`RGBLED_SPLIT`を元の`{26,29}`に戻し、一切変更なしとした。
+  2. 新規キーマップ`keymaps/web_configurator_leftball`を追加。`rules.mk`/`config.h`/`rgb_matrix_user.inc`は`web_configurator`のものをそのまま`include`し、`keymap.c`だけ`web_configurator/keymap.c`を`#include`した上で、QMKコアのweak関数`is_keyboard_left()`を独自に上書きして判定を反転させている（`is_keyboard_left_impl()`をextern宣言して呼び、結果を否定してキャッシュ）。これにより`g_led_config`/`keymaps[]`/`RGB_MATRIX_SPLIT`を一切変更せずに「ボール搭載側 = `is_keyboard_left()`が真」という前提を常に成立させられる。
+  - ボール左手で組んだユニットには今後`web_configurator_leftball`を書き込むこと。
+- `qmk compile`成功（`web_configurator`・`web_configurator_leftball`とも）。両ビルドとも`.uf2`サイズが完全一致（511488バイト）しており、`web_configurator_leftball`側のinclude/rules.mk連携が正しく機能していることを確認済み。
+- **実機確認1**: 本人より「27,28,29がまた光らなくなりました」「キー反応系エフェクトは正しく機能しているようです」と報告。診断のため一時的に`is_keyboard_left()`のオーバーライド内へデバッグ出力を追加（`matrix_scan_user`等の標準フックがweb_configurator/keymap.c側で既に使われ重複定義できないため、`is_keyboard_left()`自身の高頻度呼び出しをタイミング源に利用）し`qmk console`で確認したところ`is_left(override)=1 this_ball=1 split=[26,29]`と、意図通り反転できていることを確認。本人が直前に見ていた「光らない」症状は、この最新ビルド書き込み前（反転がまだ効いていなかった旧ビルド）での結果だったと判明。
+- **実機確認2**: 最新ビルドで再確認したところ「今は正常に動いています」「LED位置実測では確認するLEDの数がそもそも少なかった」との報告。`ledCount`修正（前項参照）がWeb UI側のブラウザキャッシュにより反映されていなかったことが原因と判明（再ビルドしたdistのハッシュが前回デプロイと完全一致することを確認済み＝コード側は既に正しい。ハード再読み込みを依頼）。
+  - また、これまでの本人申告「27,28,29番」は、非搭載側チェーンを1から数えた**物理位置**（29個中27〜29番目＝末尾3個）を指していた可能性が高いと判明。現在の正しい対応（ボール側=index0-25、非搭載側=index26-54）ではこれはグローバルインデックス**52,53,54番**（全55個の最後の3個）に相当し、`ledCount`が46までしか確認できなかった間はこの範囲を一度も検証できていなかった。
+- **一時、誤って重大な回帰を作りかけた顛末**: 本人より「Web UIに表示されているキーと実際に入力できるキーが違う（反転した状態で入力される）」と報告があり、`is_keyboard_left()`の反転がマトリクス結合順序（`thisHand`）も同時に反転させてタイピングを壊したと判断し、`web_configurator_leftball`を撤回して`web_configurator`（無印）に書き戻す対応を取りかけた。しかし本人が**Keyball LinkのWebページをリロードしたところ表示が正しくなり**、これはWeb UI側の古いキャッシュ（接続後のハンドネス取得結果が変わったのにページ側が古いレイアウト表示を保持していた）が原因で、ファームウェア側の問題ではなかったと判明。誤った撤回は行わずに済んだ。
+- **実機確認3**: 「リロードしたら修正されていました。実測は問題ありませんでした。」との報告があり、LED全点灯・キー反応系エフェクトの対応・タイピングすべてが正常であることを確認。原因切り分け用の一時デバッグ出力（`is_keyboard_left()`内）は削除し、最終形に整理済み（`qmk compile`再確認済み）。
+
+### 2026-09-18（続き8）: 「なぜ2つのファームウェアが必要なのか」指摘を受け、単一ファームウェアへ作り直し
+- 本人より「Keyballシリーズは全て基板がリバーシブルで左右どちらにもトラックボールを乗せられる。標準ファームウェアは1つで左右判定できているのになぜできないのか」と、2ビルド運用（`web_configurator`/`web_configurator_leftball`）への妥当な指摘を受けた。
+- 本家`keyball-plus-firmware`（AVR版）を確認したところ、指摘の通り以下が判明：
+  - デフォルトキーマップ（`keymaps/default/keymap.c`）は`LAYOUT_universal`（=`LAYOUT_no_ball`）を使用しており、**キー配列自体はボール搭載側/非搭載側で区別していない**（両ハーフとも全6列のスイッチがある前提。トラックボール実装スペースの位置もスイッチ自体は存在する）。
+  - RGBLIGHT版の`keyball_on_adjust_layout()`（`keyballplus.c`）は、LEDのクリッピング範囲（`rgblight_set_clipping_range()`）の**幅**を`keyball.this_have_ball`/`that_have_ball`（実際にPMW3360センサーを検出した実行時の結果）から計算しており、`is_keyboard_left()`（基板固有の配線特性。ボール搭載とは無関係）は範囲の並び順（どちらが先頭か）にしか使っていない。
+  - つまり本家の設計は最初から「ボール搭載側 = 実行時にセンサーで検出した側」を正としており、コンパイル時に固定される`is_keyboard_left()`にLEDの割り当てを依存させていない。今回のRGB_MATRIX移植（`rgb_matrix_get_limits()`/`rgb_matrix_led_index()`がweak関数ではなく`is_keyboard_left()`とコンパイル時定数`RGB_MATRIX_SPLIT`だけで範囲を固定的に決める仕組みのため）だけが、この標準的なやり方から外れて`is_keyboard_left()`に依存する設計になっていたことが根本原因だったと判明。前回「Keyball+は特殊な設計」と説明したのは誤りで訂正した。
+- **修正**: `web_configurator_leftball`は撤回し、`web_configurator`（唯一のキーマップ）に一本化。`keymap.c`に`is_keyboard_left()`のweak関数オーバーライドを追加し、以下のように動作を使い分ける：
+  - 起動直後（`g_ball_probe_ready`フラグが立つまで＝`keyboard_post_init_user()`完了前）: 基板本来の配線特性由来の値（`is_keyboard_left_impl()`）をそのまま返す。分割キーボード間の通信ネゴシエーションや`quantum/split_common/matrix.c`のマトリクス結合（`thisHand`。起動時に一度だけ`is_keyboard_left()`を読んでキャッシュし、以後は再取得しないためタイピングには影響しない）に必要なため。
+  - `g_ball_probe_ready`が立った後（`this_have_ball`が確定済み。`keyboard_post_init_kb()`内の`pmw3360_init()`はこれより前に完了している）: `keyball.this_have_ball`をそのまま返す。これによりRGB_MATRIXの以後の全呼び出し（`housekeeping_task`経由で毎フレーム呼ばれるレンダリング）で「ボール搭載側 = is_keyboard_left()が真」という前提が、実際にどちらの基板にボールを実装したかによらず常に成立する。
+  - `keyboard_post_init_user()`の末尾で`g_ball_probe_ready = true`をセット。
+- `config.h`・`g_led_config`・`keymaps[]`は一切変更なし（`RGB_MATRIX_SPLIT { 26, 29 }`のまま）。`qmk compile`成功。
+- `web_configurator_leftball`ディレクトリは不要になったが、本人の削除確認ポリシーに従いまだ削除していない（確認待ち）。
+
+### 2026-09-18（続き9）: キー反応系エフェクトが依然ズレる → g_led_config.matrix_co自体の行0-3/4-7前提を発見・修正
+- 本人より「ボール右手は問題なく動作します」（回帰なし、続き8の修正は既存機を壊していないことを確認）。「キー反応系エフェクトはダメです。押したキーとではない側のLEDが光ります」と、ボール左手機でのみ引き続き不具合を報告。
+- `REACTIVE_KEYS`/`RIPPLE`のヒット取り込みループへ一時的な`dprintf`（`idx`・`is_keyboard_left()`・`this_have_ball`・描画範囲）を追加し`qmk console`で確認。本人に「pに当たるキーを押すとqからリップルエフェクトが出ます」と報告してもらい、実際に`idx=8`（`keymaps[]`上でPキーがある行0列0の、g_led_config上のLEDインデックス）が記録されていることを確認した。
+- **根本原因（続き8の修正だけでは不十分だった理由）**: `g_led_config.matrix_co`（`keyballplus.c`。行0-3にボール搭載側、行4-7に非搭載側のLEDインデックスを割り当てた固定テーブル）は、`quantum/matrix.c`の`thisHand = isLeftHand ? 0 : MATRIX_ROWS_PER_HAND;`（起動時に一度だけ、基板本来の配線特性由来の`is_keyboard_left()`を読んでキャッシュする、続き8で触れた値と同じ仕組み）によって、「is_keyboard_left()=true側の物理スイッチが常に行0-3、false側が行4-7」という配置で埋まる。続き8の修正は**RGB_MATRIXの描画範囲（どちらのハーフがどのLEDインデックス範囲を担当するか）**をthis_have_ball基準に直したが、**`g_led_config.matrix_co`というテーブル自体の中身（行0-3にどちらのLEDインデックスが書かれているか）**は一切変更していなかった。このテーブルは「行0-3=ボール搭載側」という前提で固定的に作られているため、ボールが本来の意味でのis_keyboard_left()=false側の基板にある本ユニットでは、行0-3に実際には非搭載側のスイッチが来ているのに、そこにはボール側のLEDインデックスが割り当てられたままになり、キー反応系エフェクトの対応がズレ続けていた。
+- [x] **修正**: `keymap.c`に`kb_fixup_led_matrix_rows_if_needed()`を追加。`this_have_ball`と、基板本来の配線特性由来の値（`g_hw_is_left`。`is_keyboard_left()`オーバーライドと共有するようリファクタ）から「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側だったか」を判定し、そうであれば`g_led_config.matrix_co`（`const`ではない通常のRAM上の構造体なので実行時に書き換え可能）の行0-3と行4-7を丸ごと入れ替える。両ハーフとも自分の`this_have_ball`/`g_hw_is_left`だけで独立に同じ結論に達するため、ハーフ間の追加通信は不要。`keyboard_post_init_user()`の末尾、`g_ball_probe_ready`を立てる直前に呼ぶ。
+- 原因切り分け用の一時デバッグ出力（`REACTIVE_KEYS`・`RIPPLE`内）は削除済み。`qmk compile`成功。
+- **実機確認（最終）**: 「左手、右手ともに正常に動作しました。」と報告あり。タイピング・LED全点灯・キー反応系エフェクトすべて両機体で正常動作を確認。クローズ。
+- 単一`web_configurator`のみでKeyball+のリバーシブル設計（トラックボールをどちらの基板に実装しても正しく動く）に対応完了。`web_configurator_leftball`は不要になったため本人に確認の上、削除済み。
 
 ---
 
