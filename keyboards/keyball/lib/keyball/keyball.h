@@ -244,6 +244,12 @@ typedef struct {
     // KEYBALL_GESTURE_WAVE RPCの一部としてスレーブにも配って共有する
     // （rgb_matrix_user.incはkb_gesture_wave_speed_get()を直接呼ばず、これを読む）。
     uint8_t gesture_wave_speed;
+    // ウェーブの見た目(KB_GESTURE_WAVE_STYLE_SHARP/BREATH)。2026-09-30〜、速さ・色と
+    // 同じ理由（モードごとにEEPROM値が違う上、分割両ハーフはそれぞれ別のEEPROMを持つ）
+    // でここに解決済みの値を保持する。以前は単一設定だったためkb_gesture_wave_style_get()
+    // を直接呼んでいたが、モードごとの配列になったため呼び出しにはmodeが要る。発火元
+    // （keyball_gesture_wave_trigger）はmodeを知っているのでここで解決してから配る。
+    uint8_t gesture_wave_style;
     // ウェーブ専用の色（hue/sat/val、0-255）。速度と同じ理由（上記コメント参照）で、
     // 発火のたびにマスターが読んだ実際の値をここへ書き込み、RPCでスレーブにも配る
     // （2026-09-29〜。本人希望で「ジェスチャーLEDの色相・彩度・明るさも個別に
@@ -324,7 +330,9 @@ void keyball_set_precision_layer(bool on);
 /// and — when called on the master — also forwards it to the slave half via a one-way split
 /// transaction so both halves animate together. Call only when a real key was actually sent
 /// by the gesture (kc != 0); an unassigned direction shouldn't trigger the effect.
-void keyball_gesture_wave_trigger(uint8_t direction);
+/// mode (0-3) selects which gesture mode's speed/style/color settings to use (2026-09-30〜、
+/// 本人希望でジェスチャー1〜4ごとに個別設定できるようにした際に追加)。
+void keyball_gesture_wave_trigger(uint8_t direction, uint8_t mode);
 
 #ifdef RGB_MATRIX_ENABLE
 // gesture_wave_active[]のいずれかが発火中かどうかを見て、現在のRGB_MATRIXモードを

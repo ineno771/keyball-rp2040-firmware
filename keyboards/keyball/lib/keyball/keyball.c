@@ -549,11 +549,16 @@ static void gesture_wave_record_local(uint8_t direction) {
     keyball.gesture_wave_active[slot] = true;
 }
 
-// direction・speed・hue/sat/valをまとめてRPCで送るための型。speed同様、色も
-// keyball_gesture_wave_trigger直前のコメント参照の理由で一緒に運ぶ必要がある。
+// direction・speed・style・hue/sat/valをまとめてRPCで送るための型。speed同様、
+// styleや色も keyball_gesture_wave_trigger直前のコメント参照の理由で一緒に運ぶ
+// 必要がある（2026-09-30〜、モードごとに設定を持つようになったのに合わせてstyleも
+// 追加。modeそのものは送らず、マスターが自分のEEPROMから解決した最終的な値だけを
+// 送ることで、スレーブ側は自分のEEPROMを一切参照しなくて済む＝ハーフ間のズレが
+// 起きない）。
 typedef struct {
     uint8_t direction;
     uint8_t speed;
+    uint8_t style;
     uint8_t hue;
     uint8_t sat;
     uint8_t val;
@@ -568,8 +573,10 @@ static bool               g_gesture_wave_pending = false;
 static gesture_wave_rpc_t g_gesture_wave_pending_payload;
 #endif
 
-void keyball_gesture_wave_trigger(uint8_t direction) {
+void keyball_gesture_wave_trigger(uint8_t direction, uint8_t mode) {
     if (!kb_gesture_wave_enable_get()) return;  // 機能自体がOFFなら何もしない
+    if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;  // 呼び出し元(keymap.c)のgst_active_modeは
+                                                   // 常に0-3のはずだが念のため防御的にクランプ
 
     // 連続入力などで短時間に何度も呼ばれても、前のウェーブがまだ表示中なら次を
     // 発動させない（本人希望：重ねて発動させず、前のウェーブが終わってから次を
@@ -581,13 +588,16 @@ void keyball_gesture_wave_trigger(uint8_t direction) {
         if (keyball.gesture_wave_active[s]) return;
     }
 
-    // ウェーブの速さ・色は各ハーフが自分のEEPROMから読むと分割両ハーフで値がずれる
-    // （kb_settings.hのKB_GESTURE_WAVE_SPEED_EEPROM/KB_GESTURE_WAVE_COLOR_EEPROM
+    // ウェーブの速さ・見た目・色は各ハーフが自分のEEPROMから読むと分割両ハーフで値が
+    // ずれる（kb_settings.hのKB_GESTURE_WAVE_SPEED_EEPROM/STYLE_EEPROM/COLOR_EEPROM
     // 参照）。呼び出し元はマスターのジェスチャーエンジンのみなので、ここで読む値は
     // 常にWeb UIが実際に書き込んだ側（＝マスター）の値であり、これを両ハーフ共通の
-    // 「正」としてRPCで配る。
-    keyball.gesture_wave_speed          = kb_gesture_wave_speed_get();
-    kb_gesture_wave_color_t wave_color  = kb_gesture_wave_color_get();
+    // 「正」としてRPCで配る。2026-09-30〜: モードごとの設定になったため、発火元から
+    // 渡されたmodeでこの時点で解決し、以後（RPC送信・後続のタスク/描画）は解決済みの
+    // 値だけを見る（モード自体は運ばない）。
+    keyball.gesture_wave_speed          = kb_gesture_wave_speed_get(mode);
+    keyball.gesture_wave_style          = kb_gesture_wave_style_get(mode);
+    kb_gesture_wave_color_t wave_color  = kb_gesture_wave_color_get(mode);
     keyball.gesture_wave_hue            = wave_color.hue;
     keyball.gesture_wave_sat            = wave_color.sat;
     keyball.gesture_wave_val            = wave_color.val;
@@ -595,7 +605,8 @@ void keyball_gesture_wave_trigger(uint8_t direction) {
 #ifdef SPLIT_KEYBOARD
     g_gesture_wave_pending         = true;
     g_gesture_wave_pending_payload = (gesture_wave_rpc_t){
-        .direction = direction, .speed = keyball.gesture_wave_speed, .hue = wave_color.hue, .sat = wave_color.sat, .val = wave_color.val};
+        .direction = direction, .speed = keyball.gesture_wave_speed, .style = keyball.gesture_wave_style,
+        .hue = wave_color.hue, .sat = wave_color.sat, .val = wave_color.val};
 #endif
 }
 #endif
@@ -709,6 +720,7 @@ static void rpc_set_cpi_invoke(void) {
 static void rpc_gesture_wave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     const gesture_wave_rpc_t *req = (const gesture_wave_rpc_t *)in_data;
     keyball.gesture_wave_speed    = req->speed;
+    keyball.gesture_wave_style    = req->style;
     keyball.gesture_wave_hue      = req->hue;
     keyball.gesture_wave_sat      = req->sat;
     keyball.gesture_wave_val      = req->val;
@@ -1025,12 +1037,18 @@ static bool g_gesture_wave_overriding = false;
 // ウェーブ1回分の表示時間。スタイル（シャープ/ブリージング）ごとに描画関数
 // (rgb_matrix_user.incのGESTURE_WAVE/TRACKBALL_BREATH)が使っている式と必ず
 // 揃えること（下のスロット後片付け判定に使うため）。
+// 2026-09-30〜: 見た目・速さがモードごとの設定になったため、ここではmode引数なしの
+// kb_gesture_wave_style_get()は呼べない（そもそもどのモードか分からない）。代わりに
+// keyball_gesture_wave_trigger()が発火時点で解決してkeyball.gesture_wave_style/speed
+// へ書き込んだ値を見る（発火中は常にこの2フィールドが「今表示中のウェーブの設定」を
+// 表している。複数スロットが同時activeになることは現状の設計上ない＝トリガー側の
+// ガードで直列化されているため、単一の解決済み値で問題ない）。
 static uint16_t gesture_wave_duration_ms(void) {
     // 帯自体が動く時間（端から端まで流れきる時間）はGESTURE_WAVEと完全に同じ式
     // （2026-09-29〜、本人希望「動きはシャープと同じ」を受けてBREATHだけ遅くする
     // のをやめた）。
     uint16_t travel_ms = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
-    if (kb_gesture_wave_style_get() == KB_GESTURE_WAVE_STYLE_BREATH) {
+    if (keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH) {
         // BREATHは帯が通り過ぎた後もLEDごとに残像フェードが続くため、その猶予分
         // だけスロットの寿命を延ばす。rgb_matrix_user.incのTRACKBALL_BREATH()の
         // FADE_OUT_MSと必ず同じ値にすること（ズレると、猶予が足りずフェード完了前に
@@ -1065,7 +1083,7 @@ void keyball_gesture_wave_task(void) {
     if (active && !g_gesture_wave_overriding) {
         g_gesture_wave_overriding = true;
         rgb_matrix_enable_noeeprom();  // 通常LEDがオフ設定でもウェーブだけは見えるようにする
-        rgb_matrix_mode_noeeprom(kb_gesture_wave_style_get() == KB_GESTURE_WAVE_STYLE_BREATH ? RGB_MATRIX_CUSTOM_TRACKBALL_BREATH : RGB_MATRIX_CUSTOM_GESTURE_WAVE);
+        rgb_matrix_mode_noeeprom(keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH ? RGB_MATRIX_CUSTOM_TRACKBALL_BREATH : RGB_MATRIX_CUSTOM_GESTURE_WAVE);
     } else if (!active && g_gesture_wave_overriding) {
         g_gesture_wave_overriding = false;
         apply_layer_led_now(get_highest_layer(layer_state));

@@ -5,5 +5,5 @@
 // keyball-rp2040-firmware のリリースバージョン（セマンティックバージョニング）。
 // keyball-link-firmware（AVR版）とは別系統のバージョン番号。開発初期のため0.1.0から開始。
 #define KB_FW_VERSION_MAJOR 0
-#define KB_FW_VERSION_MINOR 2
+#define KB_FW_VERSION_MINOR 3
 #define KB_FW_VERSION_PATCH 0

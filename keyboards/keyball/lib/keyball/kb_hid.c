@@ -553,18 +553,20 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
-        // 0x24: ジェスチャー連動LEDウェーブの速さを返す
-        // 応答: [cmd, speed, status]
+        // 0x24: 指定モード(0-3)のジェスチャー連動LEDウェーブの速さを返す
+        // 要求: [cmd, mode] 応答: [cmd, mode, speed, status]
         case KB_HID_CMD_GET_GESTURE_WAVE_SPEED: {
-            response[1] = kb_gesture_wave_speed_get();
-            response[2] = KB_HID_STATUS_OK;
+            uint8_t mode = data[1];
+            response[1]  = mode;
+            response[2]  = kb_gesture_wave_speed_get(mode);
+            response[3]  = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x25: ジェスチャー連動LEDウェーブの速さを変更
-        // 要求: [cmd, speed]
+        // 0x25: 指定モードのジェスチャー連動LEDウェーブの速さを変更
+        // 要求: [cmd, mode, speed]
         case KB_HID_CMD_SET_GESTURE_WAVE_SPEED: {
-            kb_gesture_wave_speed_set(data[1]);
+            kb_gesture_wave_speed_set(data[1], data[2]);
             response[1] = KB_HID_STATUS_OK;
             break;
         }
@@ -583,36 +585,42 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
-        // 0x31: ジェスチャー連動LEDウェーブの見た目(0=シャープ 1=ブリージング)を返す
+        // 0x31: 指定モード(0-3)のジェスチャー連動LEDウェーブの見た目(0=シャープ
+        // 1=ブリージング)を返す。要求: [cmd, mode] 応答: [cmd, mode, style, status]
         case KB_HID_CMD_GET_GESTURE_WAVE_STYLE: {
-            response[1] = kb_gesture_wave_style_get();
-            response[2] = KB_HID_STATUS_OK;
+            uint8_t mode = data[1];
+            response[1]  = mode;
+            response[2]  = kb_gesture_wave_style_get(mode);
+            response[3]  = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x32: ジェスチャー連動LEDウェーブの見た目を変更
+        // 0x32: 指定モードのジェスチャー連動LEDウェーブの見た目を変更
+        // 要求: [cmd, mode, style]
         case KB_HID_CMD_SET_GESTURE_WAVE_STYLE: {
-            kb_gesture_wave_style_set(data[1]);
+            kb_gesture_wave_style_set(data[1], data[2]);
             response[1] = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x33: ジェスチャー連動LEDウェーブ専用の色を返す
-        // 応答: [cmd, hue, sat, val, status]
+        // 0x33: 指定モードのジェスチャー連動LEDウェーブ専用の色を返す
+        // 要求: [cmd, mode] 応答: [cmd, mode, hue, sat, val, status]
         case KB_HID_CMD_GET_GESTURE_WAVE_COLOR: {
-            kb_gesture_wave_color_t c = kb_gesture_wave_color_get();
-            response[1]               = c.hue;
-            response[2]               = c.sat;
-            response[3]               = c.val;
-            response[4]               = KB_HID_STATUS_OK;
+            uint8_t                  mode = data[1];
+            kb_gesture_wave_color_t c    = kb_gesture_wave_color_get(mode);
+            response[1]                  = mode;
+            response[2]                  = c.hue;
+            response[3]                  = c.sat;
+            response[4]                  = c.val;
+            response[5]                  = KB_HID_STATUS_OK;
             break;
         }
 
-        // 0x34: ジェスチャー連動LEDウェーブ専用の色を変更
-        // 要求: [cmd, hue, sat, val]
+        // 0x34: 指定モードのジェスチャー連動LEDウェーブ専用の色を変更
+        // 要求: [cmd, mode, hue, sat, val]
         case KB_HID_CMD_SET_GESTURE_WAVE_COLOR: {
-            kb_gesture_wave_color_t c = {.hue = data[1], .sat = data[2], .val = data[3]};
-            kb_gesture_wave_color_set(&c);
+            kb_gesture_wave_color_t c = {.hue = data[2], .sat = data[3], .val = data[4]};
+            kb_gesture_wave_color_set(data[1], &c);
             response[1] = KB_HID_STATUS_OK;
             break;
         }

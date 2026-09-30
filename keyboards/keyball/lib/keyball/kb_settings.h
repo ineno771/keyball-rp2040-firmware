@@ -115,9 +115,10 @@ typedef struct {
 
 // レイヤー連動LEDテーブル(0x09E7-0x0A10)の直後、慣性スクロール設定(-0x0A18)の
 // さらに直後の空き領域。4モード×10バイト=40バイト（0x0A19-0x0A40）。
-// 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROM、0x0A42はKB_GESTURE_WAVE_SPEED_EEPROM、
-// 0x0A43はKB_GESTURE_WAVE_ENABLE_EEPROMで使用済み。さらに0x0A44-0x0A46はシェイク、
-// 0x0A47-0x0A50はダブルフリック、0x0A51-0x0A52は両者の有効/無効フラグの設定で
+// 直後の0x0A41はKB_TRACKBALL_LAYERS_MAGIC_EEPROM、0x0A43はKB_GESTURE_WAVE_ENABLE_EEPROMで
+// 使用済み。0x0A42はKB_GESTURE_WAVE_SPEED_EEPROMだったが2026-09-30にモードごとの配列
+// (0x0AB6〜)へ移行したため放棄・未使用（再利用はしていない）。さらに0x0A44-0x0A46は
+// シェイク、0x0A47-0x0A50はダブルフリック、0x0A51-0x0A52は両者の有効/無効フラグの設定で
 // 使用済み（本ファイル末尾参照）。次にここへ設定を追加する場合は0x0A53以降を使うこと。
 #define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
 #define KB_GESTURE_MODE_ENTRY_SIZE   10
@@ -126,7 +127,7 @@ typedef struct {
 kb_gesture_mode_t kb_gesture_mode_get(uint8_t mode);
 void              kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg);
 
-// ── ジェスチャー連動LEDウェーブの速さ（2026-09-09〜）─────────────────
+// ── ジェスチャー連動LEDウェーブの速さ（2026-09-09〜。2026-09-30〜モードごとに分離）──
 // ウェーブが端から端まで流れきる速さ（大きいほど速い＝すぐ消える）。通常LED・
 // レイヤー連動LEDのどちらの速度設定とも独立している（ウェーブは選択式のエフェクト
 // ではなく、ジェスチャー発火時に現在の光り方を一時的に上書きする演出のため、
@@ -135,14 +136,18 @@ void              kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg
 // 領域を0x00で初期化するため（kb_settings.h冒頭のKB_TRACKBALL_LAYERS_MAGIC_EEPROM
 // 参照）。0を有効値に含めると未設定と区別できなくなるので、他のしきい値設定
 // （KB_GESTURE_TH_*等）と同じく「範囲外なら既定値」方式で回避する。
-// KB_GESTURE_MODE_TABLE_EEPROM(0x0A19-0x0A40)・KB_TRACKBALL_LAYERS_MAGIC_EEPROM(0x0A41)
-// の直後の空き番地（コメント参照）。
-#define KB_GESTURE_WAVE_SPEED_EEPROM  0x0A42
+// 2026-09-30: 本人希望で「ジェスチャー1〜4のモードごとに速さ・見た目・色を個別に
+// 設定したい」に対応するため、単一値から「モードごと(KB_GESTURE_MODE_COUNT個)の配列」
+// へ変更した。旧アドレス(0x0A42、単一値時代)は書式が変わるため再利用せず放棄し、
+// 新しい配列はKB_DPI_CURVE_POINTS_EEPROM等の後、0x0AB6以降の空き領域に置く
+// （本ファイル後方のKB_GESTURE_WAVE_STYLE_EEPROM/KB_GESTURE_WAVE_COLOR_EEPROMの
+// コメントに新アドレスの割当を一括で記載）。
+#define KB_GESTURE_WAVE_SPEED_EEPROM  0x0AB6  // モードごと1バイト×4（0x0AB6-0x0AB9）
 #define KB_GESTURE_WAVE_SPEED_MIN     1
 #define KB_GESTURE_WAVE_SPEED_MAX     255
 #define KB_GESTURE_WAVE_SPEED_DEFAULT 200
-uint8_t kb_gesture_wave_speed_get(void);
-void    kb_gesture_wave_speed_set(uint8_t v);
+uint8_t kb_gesture_wave_speed_get(uint8_t mode);
+void    kb_gesture_wave_speed_set(uint8_t mode, uint8_t v);
 
 // ジェスチャー連動LEDウェーブ機能そのものの有効/無効（既定: 有効）。他の有効/無効
 // フラグ（kb_layer_led_enable等）と違い既定がONなので、判定を反転させている：
@@ -159,34 +164,34 @@ void kb_gesture_wave_enable_set(bool v);
 // 設定化した）。0=シャープ（既存。帯が瞬間的に光ってすぐ消える。RGB_MATRIX_CUSTOM_
 // GESTURE_WAVE） 1=ブリージング（新規。輪郭が柔らかく、呼吸するように流れる。
 // RGB_MATRIX_CUSTOM_TRACKBALL_BREATH）。既定は0（今までの見た目のまま）。
-// アドレスはKB_DPI_CURVE_POINTS_EEPROM(0x0AA8-0x0AB0)の直後（本ファイル後方の
-// DPIカーブのコメント参照）。
-#define KB_GESTURE_WAVE_STYLE_EEPROM  0x0AB1
+// 2026-09-30〜: 速さと同じ理由でモードごとの配列に変更（旧アドレス0x0AB1は放棄）。
+#define KB_GESTURE_WAVE_STYLE_EEPROM  0x0ABA  // モードごと1バイト×4（0x0ABA-0x0ABD）
 #define KB_GESTURE_WAVE_STYLE_SHARP   0
 #define KB_GESTURE_WAVE_STYLE_BREATH  1
-uint8_t kb_gesture_wave_style_get(void);
-void    kb_gesture_wave_style_set(uint8_t v);
+uint8_t kb_gesture_wave_style_get(uint8_t mode);
+void    kb_gesture_wave_style_set(uint8_t mode, uint8_t v);
 
 // ジェスチャー連動LEDウェーブ専用の色（2026-09-29〜。本人希望で「色相・彩度・明るさも
 // 個別に調整したい」に対応。今までは常にその時点で表示中の通常LED/レイヤー連動LEDの
 // 色をそのまま使っていた）。hue/sat/valは0-255全域が有効値のため、他のしきい値設定の
 // ような「範囲外なら未設定」の判定ができない。そのため専用のマジックバイトで
 // 「実際に保存されたことがあるか」を区別する（KB_DPI_CURVE_MAGIC_EEPROMと同じ手法）。
-// KB_GESTURE_WAVE_STYLE_EEPROM(0x0AB1)の直後。
+// 2026-09-30〜: 速さ・見た目と同じ理由でモードごとの配列に変更（旧アドレス
+// 0x0AB2-0x0AB5は放棄）。マジックバイトもモードごとに1つずつ持つ。
 typedef struct {
     uint8_t hue;
     uint8_t sat;
     uint8_t val;
 } kb_gesture_wave_color_t;
-#define KB_GESTURE_WAVE_COLOR_EEPROM       0x0AB2  // hue,sat,valの3バイト（0x0AB2-0x0AB4）
-#define KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM 0x0AB5  // 保存済みかの目印(1バイト)
+#define KB_GESTURE_WAVE_COLOR_EEPROM       0x0ABE  // モードごとhue,sat,valの3バイト×4（0x0ABE-0x0AC9）
+#define KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM 0x0ACA  // モードごと保存済みかの目印×4（0x0ACA-0x0ACD）
 #define KB_GESTURE_WAVE_COLOR_MAGIC_VALUE  0xC7
 #define KB_GESTURE_WAVE_HUE_DEFAULT 0
 #define KB_GESTURE_WAVE_SAT_DEFAULT 255
 #define KB_GESTURE_WAVE_VAL_DEFAULT 255
-// 次にここへ設定を追加する場合は0x0AB6から。
-kb_gesture_wave_color_t kb_gesture_wave_color_get(void);
-void                    kb_gesture_wave_color_set(const kb_gesture_wave_color_t *c);
+// 次にここへ設定を追加する場合は0x0ACEから。
+kb_gesture_wave_color_t kb_gesture_wave_color_get(uint8_t mode);
+void                    kb_gesture_wave_color_set(uint8_t mode, const kb_gesture_wave_color_t *c);
 #endif
 
 // 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-5）
@@ -408,8 +413,10 @@ extern const uint8_t KB_DPI_CURVE_X[KB_DPI_CURVE_POINT_COUNT];  // 各点のX座
 // 急落するのを防ぐため。値が変わっていれば「未保存」扱いになり既定のY=Xへ戻る）。
 #define KB_DPI_CURVE_MAGIC_VALUE   0xC6
 #define KB_DPI_CURVE_POINTS_EEPROM 0x0AA8  // 出力値9点（0x0AA8-0x0AB0、各1バイト、0-255）
-// 0x0AB1はKB_GESTURE_WAVE_STYLE_EEPROM（本ファイル前方参照）で使用済み。
-// 次にここへ設定を追加する場合は0x0AB2から。
+// 0x0AB1-0x0AB5はジェスチャー連動LEDウェーブの見た目・色の旧アドレス（単一値
+// 時代）だったが、2026-09-30にモードごとの配列(0x0AB6〜0x0ACD、本ファイル前方の
+// KB_GESTURE_WAVE_SPEED/STYLE/COLOR_EEPROM参照)へ移行したため放棄・未使用。
+// 次にここへ設定を追加する場合は0x0ACEから。
 
 bool kb_dpi_curve_enable_get(void);
 void kb_dpi_curve_enable_set(bool v);

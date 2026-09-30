@@ -722,7 +722,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             bool              cont = ((m.continuous >> dir) & 1) && kc != SCRL_TO && kc != SCRL_MO;
             if (kc) {
                 kb_fire_keycode(kc);
-                keyball_gesture_wave_trigger(dir);  // 未割当方向(kc==0)では発動させない
+                keyball_gesture_wave_trigger(dir, (uint8_t)gst_mode);  // 未割当方向(kc==0)では発動させない
             }
 
             if (cont) {
