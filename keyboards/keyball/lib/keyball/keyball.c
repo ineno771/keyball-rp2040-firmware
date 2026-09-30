@@ -549,11 +549,14 @@ static void gesture_wave_record_local(uint8_t direction) {
     keyball.gesture_wave_active[slot] = true;
 }
 
-// direction・speedをまとめてRPCで送るための型。speedを一緒に運ぶ理由は
-// keyball_gesture_wave_trigger直前のコメント参照。
+// direction・speed・hue/sat/valをまとめてRPCで送るための型。speed同様、色も
+// keyball_gesture_wave_trigger直前のコメント参照の理由で一緒に運ぶ必要がある。
 typedef struct {
     uint8_t direction;
     uint8_t speed;
+    uint8_t hue;
+    uint8_t sat;
+    uint8_t val;
 } gesture_wave_rpc_t;
 
 #ifdef SPLIT_KEYBOARD
@@ -570,22 +573,29 @@ void keyball_gesture_wave_trigger(uint8_t direction) {
 
     // 連続入力などで短時間に何度も呼ばれても、前のウェーブがまだ表示中なら次を
     // 発動させない（本人希望：重ねて発動させず、前のウェーブが終わってから次を
-    // 出したい）。ここでの判定はマスター自身のローカルなgesture_wave_active[]で
-    // 行う（スレーブへは実際に発動を決めた時だけRPCで伝えるので、スレーブ側が
-    // 勝手に多重発動することもない）。
+    // 出したい。2026-09-29、一度「連続発火で上書きする」方式を試したが、やはり
+    // この動作に戻すことになった）。ここでの判定はマスター自身のローカルな
+    // gesture_wave_active[]で行う（スレーブへは実際に発動を決めた時だけRPCで
+    // 伝えるので、スレーブ側が勝手に多重発動することもない）。
     for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
         if (keyball.gesture_wave_active[s]) return;
     }
 
-    // ウェーブの速さは各ハーフが自分のEEPROMから読むと分割両ハーフで値がずれる
-    // （kb_settings.hのKB_GESTURE_WAVE_SPEED_EEPROM参照）。呼び出し元はマスターの
-    // ジェスチャーエンジンのみなので、ここで読む値は常にWeb UIが実際に書き込んだ側
-    // （＝マスター）の値であり、これを両ハーフ共通の「正」としてRPCで配る。
-    keyball.gesture_wave_speed = kb_gesture_wave_speed_get();
+    // ウェーブの速さ・色は各ハーフが自分のEEPROMから読むと分割両ハーフで値がずれる
+    // （kb_settings.hのKB_GESTURE_WAVE_SPEED_EEPROM/KB_GESTURE_WAVE_COLOR_EEPROM
+    // 参照）。呼び出し元はマスターのジェスチャーエンジンのみなので、ここで読む値は
+    // 常にWeb UIが実際に書き込んだ側（＝マスター）の値であり、これを両ハーフ共通の
+    // 「正」としてRPCで配る。
+    keyball.gesture_wave_speed          = kb_gesture_wave_speed_get();
+    kb_gesture_wave_color_t wave_color  = kb_gesture_wave_color_get();
+    keyball.gesture_wave_hue            = wave_color.hue;
+    keyball.gesture_wave_sat            = wave_color.sat;
+    keyball.gesture_wave_val            = wave_color.val;
     gesture_wave_record_local(direction);
 #ifdef SPLIT_KEYBOARD
     g_gesture_wave_pending         = true;
-    g_gesture_wave_pending_payload = (gesture_wave_rpc_t){.direction = direction, .speed = keyball.gesture_wave_speed};
+    g_gesture_wave_pending_payload = (gesture_wave_rpc_t){
+        .direction = direction, .speed = keyball.gesture_wave_speed, .hue = wave_color.hue, .sat = wave_color.sat, .val = wave_color.val};
 #endif
 }
 #endif
@@ -699,6 +709,9 @@ static void rpc_set_cpi_invoke(void) {
 static void rpc_gesture_wave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     const gesture_wave_rpc_t *req = (const gesture_wave_rpc_t *)in_data;
     keyball.gesture_wave_speed    = req->speed;
+    keyball.gesture_wave_hue      = req->hue;
+    keyball.gesture_wave_sat      = req->sat;
+    keyball.gesture_wave_val      = req->val;
     gesture_wave_record_local(req->direction);
 }
 
@@ -978,6 +991,21 @@ static void apply_layer_led_now(uint8_t hl) {
 }
 
 void keyball_apply_layer_led(uint8_t hl) {
+#if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)
+    // ジェスチャー連動LEDウェーブの表示中は、レイヤー切り替えでRGB_MATRIXモードを
+    // 奪わない（2026-09-29修正）。複数ジェスチャーモードはレイヤー切り替えで有効化
+    // する仕組みのため、「トラックボールを振ってウェーブが表示中」に「キーを離して
+    // レイヤーが戻る」操作は頻繁にタイミングが重なる。ここでガードしないと表示が
+    // 途中で奪われて乱れるだけでなく、旧実装（スロットの後片付けをGESTURE_WAVE()
+    // 描画関数任せにしていた版）ではモードを奪われている間は後片付けが一切実行され
+    // ず、スロットが永久にactiveのまま固まって以後ウェーブが二度と発火しなくなる
+    // 不具合の原因になっていた（該当スロットがkeyball_gesture_wave_trigger()の
+    // 「発火中は次を出さない」ガードを永久に塞いでしまうため）。後片付け自体は
+    // keyball_gesture_wave_task()側に移したため今はそちらの不具合は起きないが、
+    // 表示が途中で消える見た目の乱れは残るため、念のためここでもガードしておく。
+    if (keyball_gesture_wave_overriding()) return;
+#endif
+
     bool           layer_led_on = kb_layer_led_enable_get();
     kb_layer_led_t layer_led    = layer_led_on ? kb_layer_led_get(hl) : (kb_layer_led_t){0};
 
@@ -994,19 +1022,50 @@ void keyball_apply_layer_led(uint8_t hl) {
 // 呼ばれる。
 static bool g_gesture_wave_overriding = false;
 
+// ウェーブ1回分の表示時間。スタイル（シャープ/ブリージング）ごとに描画関数
+// (rgb_matrix_user.incのGESTURE_WAVE/TRACKBALL_BREATH)が使っている式と必ず
+// 揃えること（下のスロット後片付け判定に使うため）。
+static uint16_t gesture_wave_duration_ms(void) {
+    // 帯自体が動く時間（端から端まで流れきる時間）はGESTURE_WAVEと完全に同じ式
+    // （2026-09-29〜、本人希望「動きはシャープと同じ」を受けてBREATHだけ遅くする
+    // のをやめた）。
+    uint16_t travel_ms = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    if (kb_gesture_wave_style_get() == KB_GESTURE_WAVE_STYLE_BREATH) {
+        // BREATHは帯が通り過ぎた後もLEDごとに残像フェードが続くため、その猶予分
+        // だけスロットの寿命を延ばす。rgb_matrix_user.incのTRACKBALL_BREATH()の
+        // FADE_OUT_MSと必ず同じ値にすること（ズレると、猶予が足りずフェード完了前に
+        // レイヤー連動LED側へ表示が戻ってしまう、または逆に無駄に長く居座る）。
+        const uint16_t FADE_OUT_MS = 600;
+        return travel_ms + FADE_OUT_MS;
+    }
+    return travel_ms;
+}
+
 void keyball_gesture_wave_task(void) {
-    bool active = false;
+    // スロットの後片付け（表示時間を過ぎたらactiveを戻す）はここで行う。以前は
+    // GESTURE_WAVE()描画関数の中でだけ行っていたが、レイヤー連動LED側が
+    // RGB_MATRIXモードを奪っている間は描画関数自体が呼ばれず後片付けができない
+    // ままになり、そのスロットが永久にactiveのまま固まって以後ウェーブが
+    // 二度と発火しなくなる不具合があった（keyball_gesture_wave_trigger()の
+    // 「いずれかのスロットがactiveなら次を出さない」ガードが永久に塞がるため。
+    // 2026-09-29発見・修正）。housekeeping_task_kbからRGB_MATRIXモードに関係なく
+    // 毎スキャン呼ばれるこの関数に移すことで、モードが何であっても確実に
+    // 解放されるようにした。
+    uint16_t wave_ms = gesture_wave_duration_ms();
+    bool     active  = false;
     for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
-        if (keyball.gesture_wave_active[s]) {
+        if (!keyball.gesture_wave_active[s]) continue;
+        if (timer_elapsed(keyball.gesture_wave_start[s]) >= wave_ms) {
+            keyball.gesture_wave_active[s] = false;
+        } else {
             active = true;
-            break;
         }
     }
 
     if (active && !g_gesture_wave_overriding) {
         g_gesture_wave_overriding = true;
         rgb_matrix_enable_noeeprom();  // 通常LEDがオフ設定でもウェーブだけは見えるようにする
-        rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_GESTURE_WAVE);
+        rgb_matrix_mode_noeeprom(kb_gesture_wave_style_get() == KB_GESTURE_WAVE_STYLE_BREATH ? RGB_MATRIX_CUSTOM_TRACKBALL_BREATH : RGB_MATRIX_CUSTOM_GESTURE_WAVE);
     } else if (!active && g_gesture_wave_overriding) {
         g_gesture_wave_overriding = false;
         apply_layer_led_now(get_highest_layer(layer_state));

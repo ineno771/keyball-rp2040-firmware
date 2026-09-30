@@ -57,6 +57,10 @@
 #define KB_HID_CMD_GET_OS                 0x2E  // OS自動判別: 現在検出しているOS種別を取得（0=不明,1=Linux,2=Windows,3=macOS,4=iOS）
 #define KB_HID_CMD_GET_DPI_CURVE          0x2F  // DPIカーブ（有効/無効・出力5点）取得
 #define KB_HID_CMD_SET_DPI_CURVE          0x30  // DPIカーブ（有効/無効・出力5点）変更
+#define KB_HID_CMD_GET_GESTURE_WAVE_STYLE 0x31  // ジェスチャー連動LEDウェーブの見た目(0=シャープ 1=ブリージング)取得
+#define KB_HID_CMD_SET_GESTURE_WAVE_STYLE 0x32  // ジェスチャー連動LEDウェーブの見た目変更
+#define KB_HID_CMD_GET_GESTURE_WAVE_COLOR 0x33  // ジェスチャー連動LEDウェーブ専用の色(hue,sat,val)取得
+#define KB_HID_CMD_SET_GESTURE_WAVE_COLOR 0x34  // ジェスチャー連動LEDウェーブ専用の色変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
@@ -103,7 +107,7 @@ void kb_led_config_sync_from_rgb_matrix(void);
 //   定まらず一旦見送った欠番。RGB_MATRIX版では片側ハーフ内で完結する実装に直った
 //   ため対応表(kb_hid.c)には存在するが、Web UIのLED_EFFECTSは本家RGBLIGHT版とも
 //   共有しているため、そちらでは引き続き非表示にしている。
-// - 14・15・16・17・18はRGB_MATRIX版限定の追加エフェクト：
+// - 14・15・16・17・18・19はRGB_MATRIX版限定の追加エフェクト：
 //   14=リアクティブ(REACTIVE_KEYS) 15=タイピングヒートマップ(HEATMAP、自作。
 //   組み込みTYPING_HEATMAPは隣接キーへの熱伝播があり不採用。明るさは設定値のまま
 //   保持し、押した回数(蓄熱量)に応じて色相が寒色→暖色に変化する仕様)
@@ -115,8 +119,13 @@ void kb_led_config_sync_from_rgb_matrix(void);
 //   発火が終わったら元の通常LED/レイヤー連動LEDの表示に自動で復帰する。こうする
 //   ことで、レイヤー連動LEDが別のエフェクトを選んでいる最中でも必ずウェーブが
 //   見える（2026-09-09: 選択式エフェクトのままだと競合して発動しないことがあった）。
+//   19=トラックボールブリージングウェーブ(TRACKBALL_BREATH)。18と同じくジェスチャー
+//   専用・選択式エフェクトではない（GESTURE_ENABLE必須）。18のシャープな一瞬フラッシュ
+//   に対して、柔らかい輪郭で呼吸するように流れる見た目の"別スタイル"版。どちらを
+//   使うかはkb_gesture_wave_style_get()（KB_HID_CMD_GET/SET_GESTURE_WAVE_STYLE）の
+//   設定でkeyball_gesture_wave_task()が切り替える（2026-09-29〜）。
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
-#define KB_LED_EFFECT_TOTAL_COUNT    19  // 有効なeffect_idの総数（0-18。6・10・12は欠番）
+#define KB_LED_EFFECT_TOTAL_COUNT    20  // 有効なeffect_idの総数（0-19。6・10・12は欠番）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif

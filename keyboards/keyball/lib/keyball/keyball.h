@@ -244,6 +244,14 @@ typedef struct {
     // KEYBALL_GESTURE_WAVE RPCの一部としてスレーブにも配って共有する
     // （rgb_matrix_user.incはkb_gesture_wave_speed_get()を直接呼ばず、これを読む）。
     uint8_t gesture_wave_speed;
+    // ウェーブ専用の色（hue/sat/val、0-255）。速度と同じ理由（上記コメント参照）で、
+    // 発火のたびにマスターが読んだ実際の値をここへ書き込み、RPCでスレーブにも配る
+    // （2026-09-29〜。本人希望で「ジェスチャーLEDの色相・彩度・明るさも個別に
+    // 調整したい」に対応。今までは常にrgb_matrix_config.hsv＝その時点で表示中の
+    // 通常LED/レイヤー連動LEDの色をそのまま使っていた）。
+    uint8_t gesture_wave_hue;
+    uint8_t gesture_wave_sat;
+    uint8_t gesture_wave_val;
 #endif
 } keyball_t;
 

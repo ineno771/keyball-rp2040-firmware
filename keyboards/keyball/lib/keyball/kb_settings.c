@@ -229,6 +229,53 @@ void kb_gesture_wave_enable_set(bool v) {
     g_gesture_wave_enable = v ? 1 : 0;
     eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_WAVE_ENABLE_EEPROM, v ? 0 : 1);
 }
+
+// ── ジェスチャー連動LEDウェーブの見た目（既定0=シャープ。未書込み時0x00と一致するので
+// 特別な反転パターンは不要）────────────────────────────────
+static int8_t g_gesture_wave_style = -1;  // -1=未確認
+
+uint8_t kb_gesture_wave_style_get(void) {
+    if (g_gesture_wave_style < 0) {
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_WAVE_STYLE_EEPROM);
+        g_gesture_wave_style = (v == KB_GESTURE_WAVE_STYLE_BREATH) ? KB_GESTURE_WAVE_STYLE_BREATH : KB_GESTURE_WAVE_STYLE_SHARP;
+    }
+    return (uint8_t)g_gesture_wave_style;
+}
+
+void kb_gesture_wave_style_set(uint8_t v) {
+    g_gesture_wave_style = (v == KB_GESTURE_WAVE_STYLE_BREATH) ? KB_GESTURE_WAVE_STYLE_BREATH : KB_GESTURE_WAVE_STYLE_SHARP;
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_WAVE_STYLE_EEPROM, (uint8_t)g_gesture_wave_style);
+}
+
+// ── ジェスチャー連動LEDウェーブ専用の色（マジックバイトで保存済みか判定。kb_led_config
+// と同じ発想だが、あちらはAVR前提の0xFF判定で書かれておりRP2040では機能しない
+// （未書込みが0x00になるため）。DPIカーブと同じ専用マジックバイト方式にしている）──
+static kb_gesture_wave_color_t g_gesture_wave_color        = {0};
+static bool                    g_gesture_wave_color_loaded = false;
+
+kb_gesture_wave_color_t kb_gesture_wave_color_get(void) {
+    if (!g_gesture_wave_color_loaded) {
+        uint8_t magic = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM);
+        if (magic == KB_GESTURE_WAVE_COLOR_MAGIC_VALUE) {
+            uint8_t buf[3];
+            eeprom_read_block(buf, (const void *)(uintptr_t)KB_GESTURE_WAVE_COLOR_EEPROM, sizeof(buf));
+            g_gesture_wave_color = (kb_gesture_wave_color_t){.hue = buf[0], .sat = buf[1], .val = buf[2]};
+        } else {
+            g_gesture_wave_color = (kb_gesture_wave_color_t){
+                .hue = KB_GESTURE_WAVE_HUE_DEFAULT, .sat = KB_GESTURE_WAVE_SAT_DEFAULT, .val = KB_GESTURE_WAVE_VAL_DEFAULT};
+        }
+        g_gesture_wave_color_loaded = true;
+    }
+    return g_gesture_wave_color;
+}
+
+void kb_gesture_wave_color_set(const kb_gesture_wave_color_t *c) {
+    g_gesture_wave_color        = *c;
+    g_gesture_wave_color_loaded = true;
+    uint8_t buf[3]              = {c->hue, c->sat, c->val};
+    eeprom_write_block(buf, (void *)(uintptr_t)KB_GESTURE_WAVE_COLOR_EEPROM, sizeof(buf));
+    eeprom_write_byte((uint8_t *)(uintptr_t)KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM, KB_GESTURE_WAVE_COLOR_MAGIC_VALUE);
+}
 #endif
 
 // ── 超低速モードのCPI分周値（同上パターン）──────────────────────────

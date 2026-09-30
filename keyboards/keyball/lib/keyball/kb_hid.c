@@ -87,6 +87,9 @@ uint8_t kb_hid_led_effect_count(void) {
 // GESTURE_ENABLEのあるファーム（複数ジェスチャーモード対応）でのみ意味を持つ。
 // GESTURE_ENABLE無しのビルドでもID自体は予約しておき、他エフェクトとの番号衝突を防ぐ。
 #define LED_EFFECT_ID_GESTURE_WAVE    18
+// トラックボールブリージングウェーブ。TRACKBALL(16)と同じくGESTURE_ENABLE不要で、
+// RGB_MATRIX_CUSTOM_USERがあれば常に選択できる（RP2040版のみ。2026-09-29〜）。
+#define LED_EFFECT_ID_TRACKBALL_BREATH 19
 #ifdef RGB_MATRIX_CUSTOM_USER
 static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
     RGB_MATRIX_NONE,               //  0: オフ
@@ -122,6 +125,7 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
     if (effect_id == LED_EFFECT_ID_TYPING_HEATMAP) return RGB_MATRIX_CUSTOM_HEATMAP;
     if (effect_id == LED_EFFECT_ID_TRACKBALL) return RGB_MATRIX_CUSTOM_TRACKBALL;
     if (effect_id == LED_EFFECT_ID_RIPPLE) return RGB_MATRIX_CUSTOM_RIPPLE;
+    if (effect_id == LED_EFFECT_ID_TRACKBALL_BREATH) return RGB_MATRIX_CUSTOM_TRACKBALL_BREATH;
 #ifdef GESTURE_ENABLE
     if (effect_id == LED_EFFECT_ID_GESTURE_WAVE) return RGB_MATRIX_CUSTOM_GESTURE_WAVE;
 #endif
@@ -180,6 +184,8 @@ void kb_led_config_sync_from_rgb_matrix(void) {
             effect_id = LED_EFFECT_ID_TRACKBALL;
         } else if (mode == RGB_MATRIX_CUSTOM_RIPPLE) {
             effect_id = LED_EFFECT_ID_RIPPLE;
+        } else if (mode == RGB_MATRIX_CUSTOM_TRACKBALL_BREATH) {
+            effect_id = LED_EFFECT_ID_TRACKBALL_BREATH;
         }
 #ifdef GESTURE_ENABLE
         else if (mode == RGB_MATRIX_CUSTOM_GESTURE_WAVE) {
@@ -573,6 +579,40 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         // 0x27: ジェスチャー連動LEDウェーブの有効/無効を変更
         case KB_HID_CMD_SET_GESTURE_WAVE_ENABLE: {
             kb_gesture_wave_enable_set(data[1] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x31: ジェスチャー連動LEDウェーブの見た目(0=シャープ 1=ブリージング)を返す
+        case KB_HID_CMD_GET_GESTURE_WAVE_STYLE: {
+            response[1] = kb_gesture_wave_style_get();
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x32: ジェスチャー連動LEDウェーブの見た目を変更
+        case KB_HID_CMD_SET_GESTURE_WAVE_STYLE: {
+            kb_gesture_wave_style_set(data[1]);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x33: ジェスチャー連動LEDウェーブ専用の色を返す
+        // 応答: [cmd, hue, sat, val, status]
+        case KB_HID_CMD_GET_GESTURE_WAVE_COLOR: {
+            kb_gesture_wave_color_t c = kb_gesture_wave_color_get();
+            response[1]               = c.hue;
+            response[2]               = c.sat;
+            response[3]               = c.val;
+            response[4]               = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x34: ジェスチャー連動LEDウェーブ専用の色を変更
+        // 要求: [cmd, hue, sat, val]
+        case KB_HID_CMD_SET_GESTURE_WAVE_COLOR: {
+            kb_gesture_wave_color_t c = {.hue = data[1], .sat = data[2], .val = data[3]};
+            kb_gesture_wave_color_set(&c);
             response[1] = KB_HID_STATUS_OK;
             break;
         }

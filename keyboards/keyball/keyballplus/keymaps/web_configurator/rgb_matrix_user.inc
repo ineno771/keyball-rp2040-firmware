@@ -55,6 +55,15 @@ RGB_MATRIX_EFFECT(HEATMAP)
 // ものではなく、keyball_gesture_wave_task()がジェスチャー発火中だけ現在のモードを
 // 強制的にこれへ切り替え、終わったら元に戻す「常時有効なオーバーレイ」のため）。
 RGB_MATRIX_EFFECT(GESTURE_WAVE)
+
+// TRACKBALL_BREATH: GESTURE_WAVEと同じ発火の仕組み（トリガー元・6スロットの管理は
+// 完全に共通）を使う、見た目だけ異なる「もう一つのスタイル」。GESTURE_WAVEがシャープに
+// 一瞬光って消えるのに対し、こちらは輪郭が柔らかく、呼吸するように流れる
+// （本人希望「トラックボールを動かした方向にふわっとブリージングのようなウェーブが
+// 出るエフェクト」をジェスチャー専用にしたもの、2026-09-29）。どちらを使うかは
+// kb_gesture_wave_style_get()の設定でkeyball_gesture_wave_task()が切り替えるため、
+// GESTURE_WAVEと同じくWeb UIのLED_EFFECTS一覧には出さない。
+RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 #endif
 
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
@@ -608,7 +617,12 @@ static bool GESTURE_WAVE(effect_params_t* params) {
     // 代わりに発火のたびにkeyball.cがRPCで両ハーフへ配ったkeyball.gesture_wave_speed
     // を読む（詳細はkeyball.hのコメント参照）。
     const uint16_t WAVE_MS    = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
-    const uint8_t  WAVE_WIDTH = 20;  // 帯の太さ（g_led_config.point座標系での幅）
+    // 帯の太さ（g_led_config.point座標系での幅）。左右(x)方向の座標範囲は上下(y)方向
+    // より1.4倍程度広いため、同じ太さのままだと左右に振った時だけ帯が範囲全体に
+    // 占める割合が小さく、光り方が小さく見えていた（2026-09-29判明）。左右方向だけ
+    // 太さを広げて釣り合わせる。
+    const uint8_t WAVE_WIDTH_V = 20;  // 上下方向
+    const uint8_t WAVE_WIDTH_H = 28;  // 左右方向
 
     HSV base = rgb_matrix_config.hsv;
     for (uint8_t i = led_min; i < led_max; i++) {
@@ -624,6 +638,7 @@ static bool GESTURE_WAVE(effect_params_t* params) {
 
                 uint8_t dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
                 bool    horizontal = (dir == 2 || dir == 3);
+                uint8_t WAVE_WIDTH = horizontal ? WAVE_WIDTH_H : WAVE_WIDTH_V;
                 uint8_t coord      = horizontal ? g_led_config.point[i].x : g_led_config.point[i].y;
                 uint8_t range_min  = horizontal ? x_min : y_min;
                 uint8_t range_max  = horizontal ? x_max : y_max;
@@ -644,11 +659,19 @@ static bool GESTURE_WAVE(effect_params_t* params) {
                 int16_t d = (int16_t)coord - (int16_t)wave_coord;
                 if (d < 0) d = -d;
                 if (d < WAVE_WIDTH) {
-                    // ピーク輝度は常に255固定（本来の挙動に戻す。base.vでスケールすると
-                    // Valを低めに設定している時にウェーブがほとんど見えなくなり、
-                    // 「ウェーブが消えているだけに見える」という状態になっていた）。
+                    // 明るさはジェスチャー専用の設定値(keyball.gesture_wave_val)を
+                    // ピークとしてスケールする（2026-09-29〜。以前は常に255固定
+                    // だったが、本人希望で明るさも個別調整できるようにした）。
                     uint8_t bright = (uint8_t)(255 - ((uint32_t)d * 255 / WAVE_WIDTH));
-                    if (bright > out.v) out.v = bright;  // 帯同士が重なる場合は明るい方を採用
+                    uint8_t v      = (uint8_t)(((uint16_t)bright * keyball.gesture_wave_val) / 255);
+                    if (v > out.v) {
+                        // 色相・彩度もジェスチャー専用の設定値を使う（本人希望、2026-09-29〜。
+                        // 以前は常にrgb_matrix_config.hsv＝その時点で表示中の通常LED/
+                        // レイヤー連動LEDの色をそのまま使っていた）。
+                        out.h = keyball.gesture_wave_hue;
+                        out.s = keyball.gesture_wave_sat;
+                        out.v = v;  // 帯同士が重なる場合は明るい方を採用
+                    }
                 }
             }
         }
@@ -656,10 +679,138 @@ static bool GESTURE_WAVE(effect_params_t* params) {
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
 
-    for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
-        if (keyball.gesture_wave_active[s] && timer_elapsed(keyball.gesture_wave_start[s]) >= WAVE_MS) {
-            keyball.gesture_wave_active[s] = false;
+    // スロットの後片付け（表示時間切れのactive解除）はkeyball_gesture_wave_task()
+    // 側に一元化した（2026-09-29）。以前はここでしか行っておらず、レイヤー連動LEDに
+    // RGB_MATRIXモードを奪われている間はこの関数自体が呼ばれず後片付けができない
+    // ままになり、スロットが永久にactiveのまま固まって以後ウェーブが発火しなくなる
+    // 不具合があった（詳細はkeyball.cのkeyball_gesture_wave_task()コメント参照）。
+
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// TRACKBALL_BREATH: GESTURE_WAVEを基準に作った「もう一つのスタイル」。「帯の範囲に
+// 入っているかどうか」の判定式はGESTURE_WAVEと完全に同一（速度・幅・起点も同じ）。
+// これにより光る場所・タイミングがGESTURE_WAVEと完全に一致する（判定式がわずかでも
+// 違うと「シャープでは光るのにブリージングでは光らない」箇所が生まれてしまうため、
+// 2026-09-29、このように統一した）。常時点灯がアンダーグローだけである点、色相・
+// 彩度がジェスチャー専用の設定値をそのまま使う点もGESTURE_WAVEと同じ。
+// 違うのは「点灯・消灯のなめらかさ」だけ:
+//   ・GESTURE_WAVEは帯の範囲に入った瞬間に明るさが距離だけで決まり、範囲を外れた
+//     瞬間に即座に消灯する
+//   ・こちらは、帯の範囲に入っている間はFADE_IN_MSかけてゆっくり明るくなり、範囲を
+//     外れた後はFADE_OUT_MSかけてゆっくり暗くなる（本人希望「消灯時は通常エフェクト
+//     のブリージングのようにゆっくり消える。点灯時も同様にゆっくり光るように」、
+//     2026-09-29）。範囲を外れた瞬間の明るさから減衰を始めるため、フェードインの
+//     途中で範囲を外れても不自然に飛ばない。
+// どちらを描画するかはkeyball_gesture_wave_task()がkb_gesture_wave_style_get()の
+// 設定でRGB_MATRIXモードを切り替えて選ぶため、この関数自体はGESTURE_WAVEと同じ
+// スロットを読むだけで、切り替えロジックは持たない。
+static bool TRACKBALL_BREATH(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    if (led_max <= led_min) return rgb_matrix_check_finished_leds(led_max);
+
+    uint8_t half_min = is_keyboard_left() ? 0 : 26;
+    uint8_t half_max = is_keyboard_left() ? 26 : RGB_MATRIX_LED_COUNT;
+
+    static bool    bounds_ready = false;
+    static uint8_t x_min, x_max, y_min, y_max;
+    if (!bounds_ready) {
+        x_min = y_min = 255;
+        x_max = y_max = 0;
+        for (uint8_t i = half_min; i < half_max; i++) {
+            uint8_t x = g_led_config.point[i].x;
+            uint8_t y = g_led_config.point[i].y;
+            if (x < x_min) x_min = x;
+            if (x > x_max) x_max = x;
+            if (y < y_min) y_min = y;
+            if (y > y_max) y_max = y;
         }
+        bounds_ready = true;
+    }
+
+    // 帯の速さ・幅・起点はGESTURE_WAVEと完全に同じ式（keyball.cの
+    // gesture_wave_duration_ms()もこのWAVE_MSの式＋FADE_OUT_MSの猶予、という前提で
+    // 計算しているので、変更する場合はFADE_OUT_MSの値も含め必ず両方揃えること）。
+    const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    const uint8_t  WAVE_WIDTH_V = 20;   // GESTURE_WAVEと同じ幅（上下方向）
+    const uint8_t  WAVE_WIDTH_H = 28;   // GESTURE_WAVEと同じ幅（左右方向。座標範囲が広い分太くしてある）
+    const uint16_t FADE_IN_MS   = 250;  // 帯の範囲に入ってから最大の明るさになるまでの時間
+    const uint16_t FADE_OUT_MS  = 600;  // 帯の範囲を外れてから消えきるまでの時間
+
+    // LEDごとに「前フレームで帯の範囲に入っていたか」と、その状態が最後に切り替わった
+    // 時刻・明るさを記憶しておく（点灯・消灯それぞれのフェードの基準点。
+    // REACTIVE_KEYS/TWINKLEと同じ、LEDの数だけ独立したスロットを持つ方式）。
+    static bool     gate_prev[RGB_MATRIX_LED_COUNT];
+    static uint16_t on_since[RGB_MATRIX_LED_COUNT];
+    static uint16_t off_since[RGB_MATRIX_LED_COUNT];
+    static uint8_t  off_peak[RGB_MATRIX_LED_COUNT];
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時点灯（GESTURE_WAVEと同じ扱い）
+        } else {
+            out.v = 0;  // 基本は消灯（GESTURE_WAVEと同じ。常時点灯はアンダーグローのみ）
+
+            // 帯の範囲に入っているかどうかの判定はGESTURE_WAVEと全く同じ式を使う。
+            bool gate = false;
+            for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+                if (!keyball.gesture_wave_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(keyball.gesture_wave_start[s]);
+                if (elapsed >= WAVE_MS) continue;
+
+                uint8_t  dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
+                bool     horizontal = (dir == 2 || dir == 3);
+                uint8_t  WAVE_WIDTH = horizontal ? WAVE_WIDTH_H : WAVE_WIDTH_V;
+                uint8_t  coord      = horizontal ? g_led_config.point[i].x : g_led_config.point[i].y;
+                uint8_t  range_min  = horizontal ? x_min : y_min;
+                uint8_t  range_max  = horizontal ? x_max : y_max;
+                uint16_t range      = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
+
+                // 起点・向きの反転はGESTURE_WAVEと同じ実機確認済みの値を使う
+                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
+                uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
+
+                int16_t d = (int16_t)coord - (int16_t)wave_coord;
+                if (d < 0) d = -d;
+                if (d < WAVE_WIDTH) {
+                    gate = true;
+                    break;
+                }
+            }
+
+            uint8_t env;
+            if (gate) {
+                if (!gate_prev[i]) on_since[i] = timer_read();  // 消灯→点灯に切り替わった瞬間
+                uint16_t t = timer_elapsed(on_since[i]);
+                env         = (t >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t * 255) / FADE_IN_MS);
+            } else {
+                if (gate_prev[i]) {
+                    // ちょうど今、帯の範囲を外れた瞬間。その時点の明るさを記録して
+                    // そこからフェードアウトを始める（フェードイン途中でも不自然に
+                    // 飛ばないようにするため）。
+                    off_since[i]  = timer_read();
+                    uint16_t t_on = timer_elapsed(on_since[i]);
+                    off_peak[i]   = (t_on >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t_on * 255) / FADE_IN_MS);
+                }
+                uint16_t t = timer_elapsed(off_since[i]);
+                env         = (t >= FADE_OUT_MS) ? 0 : (uint8_t)(((uint32_t)off_peak[i] * (FADE_OUT_MS - t)) / FADE_OUT_MS);
+            }
+            gate_prev[i] = gate;
+
+            // GESTURE_WAVEと同じく、色相・彩度はジェスチャー専用の設定値をそのまま
+            // 使う（ブレンドしない）。明るさだけを、設定値(peak)をenvの割合で
+            // スケールして使う。
+            if (env > 0) {
+                out.h = keyball.gesture_wave_hue;
+                out.s = keyball.gesture_wave_sat;
+                out.v = (uint8_t)(((uint16_t)env * keyball.gesture_wave_val) / 255);
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
 
     return rgb_matrix_check_finished_leds(led_max);

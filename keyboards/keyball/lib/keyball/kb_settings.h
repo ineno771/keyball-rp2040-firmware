@@ -153,6 +153,40 @@ void    kb_gesture_wave_speed_set(uint8_t v);
 #define KB_GESTURE_WAVE_ENABLE_EEPROM 0x0A43
 bool kb_gesture_wave_enable_get(void);
 void kb_gesture_wave_enable_set(bool v);
+
+// ジェスチャー連動LEDウェーブの見た目（2026-09-29〜。本人希望で「呼吸するような
+// 柔らかいウェーブ」の新スタイルを追加した際、既存のシャープな見た目も選べるように
+// 設定化した）。0=シャープ（既存。帯が瞬間的に光ってすぐ消える。RGB_MATRIX_CUSTOM_
+// GESTURE_WAVE） 1=ブリージング（新規。輪郭が柔らかく、呼吸するように流れる。
+// RGB_MATRIX_CUSTOM_TRACKBALL_BREATH）。既定は0（今までの見た目のまま）。
+// アドレスはKB_DPI_CURVE_POINTS_EEPROM(0x0AA8-0x0AB0)の直後（本ファイル後方の
+// DPIカーブのコメント参照）。
+#define KB_GESTURE_WAVE_STYLE_EEPROM  0x0AB1
+#define KB_GESTURE_WAVE_STYLE_SHARP   0
+#define KB_GESTURE_WAVE_STYLE_BREATH  1
+uint8_t kb_gesture_wave_style_get(void);
+void    kb_gesture_wave_style_set(uint8_t v);
+
+// ジェスチャー連動LEDウェーブ専用の色（2026-09-29〜。本人希望で「色相・彩度・明るさも
+// 個別に調整したい」に対応。今までは常にその時点で表示中の通常LED/レイヤー連動LEDの
+// 色をそのまま使っていた）。hue/sat/valは0-255全域が有効値のため、他のしきい値設定の
+// ような「範囲外なら未設定」の判定ができない。そのため専用のマジックバイトで
+// 「実際に保存されたことがあるか」を区別する（KB_DPI_CURVE_MAGIC_EEPROMと同じ手法）。
+// KB_GESTURE_WAVE_STYLE_EEPROM(0x0AB1)の直後。
+typedef struct {
+    uint8_t hue;
+    uint8_t sat;
+    uint8_t val;
+} kb_gesture_wave_color_t;
+#define KB_GESTURE_WAVE_COLOR_EEPROM       0x0AB2  // hue,sat,valの3バイト（0x0AB2-0x0AB4）
+#define KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM 0x0AB5  // 保存済みかの目印(1バイト)
+#define KB_GESTURE_WAVE_COLOR_MAGIC_VALUE  0xC7
+#define KB_GESTURE_WAVE_HUE_DEFAULT 0
+#define KB_GESTURE_WAVE_SAT_DEFAULT 255
+#define KB_GESTURE_WAVE_VAL_DEFAULT 255
+// 次にここへ設定を追加する場合は0x0AB6から。
+kb_gesture_wave_color_t kb_gesture_wave_color_get(void);
+void                    kb_gesture_wave_color_set(const kb_gesture_wave_color_t *c);
 #endif
 
 // 超低速（精密作業）モードのCPI分周値（押している間、CPIをこの値で割る。既定4、範囲2-5）
@@ -374,8 +408,8 @@ extern const uint8_t KB_DPI_CURVE_X[KB_DPI_CURVE_POINT_COUNT];  // 各点のX座
 // 急落するのを防ぐため。値が変わっていれば「未保存」扱いになり既定のY=Xへ戻る）。
 #define KB_DPI_CURVE_MAGIC_VALUE   0xC6
 #define KB_DPI_CURVE_POINTS_EEPROM 0x0AA8  // 出力値9点（0x0AA8-0x0AB0、各1バイト、0-255）
-// 次にここへ設定を追加する場合は0x0AB1から（一度「加速度スクロール」用に割り当てた
-// が、機能自体を削除したため未使用に戻っている。実機に書き込まれたことは無い）。
+// 0x0AB1はKB_GESTURE_WAVE_STYLE_EEPROM（本ファイル前方参照）で使用済み。
+// 次にここへ設定を追加する場合は0x0AB2から。
 
 bool kb_dpi_curve_enable_get(void);
 void kb_dpi_curve_enable_set(bool v);

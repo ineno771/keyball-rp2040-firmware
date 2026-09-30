@@ -9,7 +9,7 @@
 - **GitHub**: https://github.com/ineno771/keyball-rp2040-firmware （個人アカウント配下・Public。keyball-plus-firmwareと同様）
 - **ベースにした既存プロジェクト**: `~/keyball-link-firmware`（GitHub: Yowkees/keyball-link-firmware）のKeyball39定義。これがKeyball Link（Web版設定ツール）から現在実際に書き込まれているファームウェア。
 - **ハードウェア方針**: 基板は無改修。既存Keyball39の12ピンPro Microソケット（コンスルー接続）に、SparkFun Pro RP2040をそのまま挿す。分割両側ともRP2040化。
-- **現在のファームバージョン**: 0.1.0（`keyboards/keyball/lib/keyball/kb_version.h`。AVR版とは別系統の番号）
+- **現在のファームバージョン**: 0.2.0（`keyboards/keyball/lib/keyball/kb_version.h`。AVR版とは別系統の番号）
 
 ---
 
@@ -94,7 +94,7 @@
   - 副次的に、SPIピン(`SPI_SCK_PIN`/`MOSI`/`MISO`)を`keyball39/config.h`に明示指定（B1/B2/B3、実配線に合わせる）。QMKのボード既定値と実は一致していたが、依存関係を明示するため残した。
 - [x] **Keyball Linkでの認識確認**: 実機で「Keyball39」として正しく認識されることを確認済み（2026-09-02）。Web側のコード変更は不要だった。
 - [x] **macOS JIS配列認識の確認**（2026-09-02完了）: 新規PID(`0x0600`)を初めて認識するMacでは、`com.apple.keyboardtype.plist`書き換え＋USB抜き差しだけではJIS配列が反映されないことがあった（`cfprefsd`再起動レベルでは足りない、より深いキャッシュが残る様子）。**Macを完全に再起動**したところ解消。ファームウェア・Web側とも実装は正しく、原因はmacOS側の「初めて見るPID」に対するキャッシュだった。新しいPIDを発行するたびに起こりうるので、他機種のRP2040化やPID変更時も同様の切り分けをすること。
-- [ ] **LED電圧問題の実機確認**: 3.3Vロジックで5V駆動のLEDチェーンが正常に光るか（チラつき等が出ないか）。上記バグ修正後、通常の発光は確認できたが、長時間点灯や高輝度時のチラつき等はまだ未検証。
+- [x] **LED電圧問題の実機確認（2026-09-25確認済み）**: 3.3Vロジックで5V駆動のLEDチェーンが正常に光るか（チラつき等が出ないか）。長時間点灯・高輝度時のチラつき含め、本人により動作確認済み。クローズ。
 - [ ] **LAYOUTマクロ警告の解消**（優先度低・本人了承済み）: `default`/`develop`/`via`/`test`の4キーマップが`keyball39.h`の手書きLAYOUTマクロを使用中（本番の`web_configurator`は未使用）。`keyboard.json`側に`matrix`座標データが無いためQMKの警告が出るが、ビルドは正常に成功し実害なし。対応する場合は39キー×4パターン分の`matrix`座標をJSON化した上で`.h`側の手書き定義を削除する必要がある（転記ミスのリスクがあるため急ぎでは対応しない方針）。
 - [ ] **Keyball44/61のRP2040対応**: 今回はKeyball39のみ。他機種は今後別途。
 - [ ] **RP2040の大容量フラッシュを活かした新機能（残りのアイデア）**: RGB_MATRIX移行・レイヤー数8化・LED波紋演出・レイヤー切替LED演出・汎用連続値調整機能・スクロール慣性・ジェスチャー連動LEDウェーブ・矢印キーモード・ジェスチャーによるレイヤー切替は実装済み（詳細は2章。矢印キーモード・レイヤー切替の2つは専用実装ではなく複数ジェスチャーモードの方向別キー割当で目的達成）。未着手のまま残っているのは：軸スナップモード、方向別感度調整（8方向）、パイメニュー、OLEDリッチ化。
@@ -264,6 +264,39 @@
 - 原因切り分け用の一時デバッグ出力（`REACTIVE_KEYS`・`RIPPLE`内）は削除済み。`qmk compile`成功。
 - **実機確認（最終）**: 「左手、右手ともに正常に動作しました。」と報告あり。タイピング・LED全点灯・キー反応系エフェクトすべて両機体で正常動作を確認。クローズ。
 - 単一`web_configurator`のみでKeyball+のリバーシブル設計（トラックボールをどちらの基板に実装しても正しく動く）に対応完了。`web_configurator_leftball`は不要になったため本人に確認の上、削除済み。
+
+### 2026-09-29: 新LEDエフェクト「トラックボールブリージングウェーブ」追加 → ジェスチャー専用に再設計 → 「ジェスチャー連動LEDが何度か使うと発火しなくなる」バグを発見・修正（ビルド確認のみ・実機未確認・未コミット）
+- 本人希望: 「トラックボールを動かした方向にふわっとブリージングのようなウェーブが出るエフェクト」を追加してほしい。
+- **1回目の実装（後で方向転換）**: `TRACKBALL`（全LED一律の明滅）と`GESTURE_WAVE`（ジェスチャー発火時だけの帯状の一瞬フラッシュ）の中間のような、生のトラックボール移動に常時反応する選択式エフェクト`TRACKBALL_BREATH`として実装・ビルド確認まで完了。
+- 実機確認の案内後、本人から仕様変更の依頼: 「①トラックボールブリージングウェーブはジェスチャー専用のエフェクトにしてほしい ②レイヤー連動LEDが点灯中でも上書きして発動するようにしてほしい ③ジェスチャー連動LEDが何度か使うと発火しなくなる不具合の原因も調べてほしい」。
+- ③を先に調査。**原因**: `keyball_gesture_wave_trigger()`（keyball.c）は「6スロットのうち1つでもactiveなら次の発火を無視する」ガードを持つが、スロットのactive解除（後片付け）は`GESTURE_WAVE()`描画関数（rgb_matrix_user.inc）の中でしか行っていなかった。一方`keyball_apply_layer_led()`はレイヤー切り替えのたびに、ジェスチャーウェーブ表示中かどうかを確認せずRGB_MATRIXモードを強制的に書き換える。複数ジェスチャーモードはレイヤー切り替えで有効化する仕組みのため「ウェーブ表示中にキーを離してレイヤーが戻る」操作が頻繁にタイミングが重なり、モードを奪われた瞬間そのスロットの後片付けが二度と実行されず、永久にactiveのまま固まって以後の発火が全てブロックされる（＝「何度か使っていると発動しなくなる」）。
+- ①②③をまとめて対応する形で再設計：
+  - **スロットの後片付けを`keyball_gesture_wave_task()`（keyball.c、RGB_MATRIXモードに関係なく両ハーフで毎スキャン実行）に一元化**。描画関数任せだった旧実装の構造的な欠陥を解消（③の根本修正）。
+  - **`keyball_apply_layer_led()`に`keyball_gesture_wave_overriding()`のガードを追加**。ウェーブ表示中はレイヤー切り替えでRGB_MATRIXモードを奪わないようにし、表示が途中で乱れる見た目の問題も併せて解消（②の裏返しとして、レイヤー連動LED側がウェーブに道を譲る形にした）。
+  - **`TRACKBALL_BREATH`をGESTURE_WAVEと全く同じ発火の仕組み（トリガー元・6スロットの管理）を共有する「もう一つの見た目」に再設計**（①）。Web UIのLED_EFFECTS一覧からは削除し、GESTURE_WAVEと同様に選択式エフェクトではなくした。
+  - **新設定「ジェスチャー連動LEDウェーブの見た目」を追加**（本人が「既存のシャープな見た目と新しい柔らかい見た目のどちらも選べるようにする」を選択）。`kb_gesture_wave_style_get/set()`（`kb_settings.h/c`、EEPROM `0x0AB1`、既定0=シャープ）と、新HIDコマンド`KB_HID_CMD_GET/SET_GESTURE_WAVE_STYLE`(0x31/0x32、`kb_hid.h/c`)で追加。`keyball_gesture_wave_task()`はこの設定に応じて`RGB_MATRIX_CUSTOM_GESTURE_WAVE`（シャープ）/`RGB_MATRIX_CUSTOM_TRACKBALL_BREATH`（ブリージング）のどちらへ強制切り替えするかを選ぶ。
+  - `TRACKBALL_BREATH`の見た目自体（輪郭が2乗カーブで柔らかい・三角波でフェードイン/アウトする「呼吸」）は1回目の実装から変更なし。速さはGESTURE_WAVE(200〜900ms)よりゆっくり（800〜2200ms）。この式は`keyball.c`の`gesture_wave_duration_ms()`と`rgb_matrix_user.inc`の`TRACKBALL_BREATH()`の両方に同じ値で存在するので、片方だけ変更するとスロットの後片付けタイミングと表示時間がズレるため、変更時は両方揃えること。
+  - Web側（`~/keyball-configurator`）: `LED_EFFECTS`から`{id:19}`を削除。`GestureCard.tsx`のジェスチャーウェーブ設定に「見た目」セレクトを追加（`gestureWaveStyle`/`onGestureWaveStyleChange`、`hid.ts`/`useKeyball.ts`/`TrackballSettingsTab.tsx`/`App.tsx`まで配線。プリセットの書き出し/読み込みにも対応）。
+- **追加要望「明るさは明るく、彩度は少し落として」→ さらに「色相・彩度・明るさも個別に調整したい」**: 最初はTWINKLEと同じ「boostが強いほど彩度を落とし明るさを255へ近づける」自動演出で対応したが、続けて本人から「色相・彩度・明るさも自分で調整できるようにしてほしい」との要望があり、ジェスチャーウェーブ専用の色設定を新設。
+  - `kb_settings.h/c`: `kb_gesture_wave_color_get/set()`を追加。hue/sat/valは0-255全域が有効値のため、DPIカーブと同じ「専用マジックバイト（`KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM` 0x0AB5、値0xC7）で保存済みか判定」方式にした（RP2040のEEPROMは未書込みが0x00になるため、通常の「範囲外なら未設定」判定が使えない）。EEPROM `0x0AB2-0x0AB4`（hue,sat,val）。既定はhue=0・sat=255・val=255。
+  - `keyball.h`/`keyball.c`: 速度と同じ理由（分割両ハーフはそれぞれ別のEEPROMを持つ）で、`keyball_t`に`gesture_wave_hue/sat/val`を追加し、発火のたびにマスターが読んだ値をRPC(`gesture_wave_rpc_t`にhue/sat/valを追加)でスレーブにも配る。
+  - `kb_hid.h/c`: 新HIDコマンド`KB_HID_CMD_GET/SET_GESTURE_WAVE_COLOR`(0x33/0x34)を追加。
+  - `rgb_matrix_user.inc`（keyball39/keyballplus）: `GESTURE_WAVE()`は輝度のピークを`keyball.gesture_wave_val`でスケールし、色相・彩度も`keyball.gesture_wave_hue/sat`を直接使うように変更（以前は常に255固定・色相彩度は表示中のLED色をそのまま使用）。`TRACKBALL_BREATH()`は背景色(base)からジェスチャー専用色へboostの割合で線形ブレンドする方式に変更（色相は0-255の環状値のため、差分を-128〜128に正規化して最短経路で補間する必要がある）。
+  - Web側: `GestureWaveColor`型を追加し、`GestureCard.tsx`に色相・彩度・明るさの3本のスライダーを追加（`gestureWaveColor`/`onGestureWaveColorChange`、`hid.ts`/`useKeyball.ts`/`TrackballSettingsTab.tsx`/`App.tsx`まで配線。プリセットにも対応）。
+  - `kb_version.h`: 0.1.0 → 0.2.0（新機能のためminorを上げた）。
+- `qmk compile`（keyball39・keyballplus、RP2040版web_configurator）・`npx tsc --noEmit`・`npm run update-firmware`（全機種ビルド＋整合性チェック）・`npm run build`いずれも成功。
+- **実機確認はこれから**。特に③（発火しなくなる不具合）は再現に時間がかかる系の不具合だったため、レイヤー切り替えを絡めた操作を普段通り繰り返して長時間再発しないか確認してほしい。確認後、問題なければコミット・pushする（本人の明確な許可を得てから実行する運用は継続）。
+
+### 2026-09-29（続き）: TRACKBALL_BREATHの見た目を「ブレンド式の呼吸」から「GESTURE_WAVE基準のフェード式」へ再設計。左右ウェーブの太さ非対称も修正（ビルド確認済み・実機確認OK・未コミット）
+- 実機確認の中で本人から複数の見た目フィードバックがあり、都度修正:
+  - 「ブリージングが順番にウェーブになっていない」「私が思っているブリージングと違う。動きはシャープと同じで残像が残っていくイメージ。点灯と消灯にフェードを加える感じ」「常時点灯はアンダーグローだけでいい。シャープを基準に作成してほしい」との指摘を受け、当初の「背景色から専用色へboost割合でブレンドする呼吸」方式を全面破棄。
+  - **最終設計**: `TRACKBALL_BREATH()`を`GESTURE_WAVE()`と完全に同じトリガー判定・幅・進行速度（`WAVE_MS`の式も同一）にし、非アンダーグローLEDは`out.v=0`が基準（GESTURE_WAVEと同じ、ブレンドしない）。その上で、GESTURE_WAVEの「即オン/即オフ」の代わりに、LEDごとのゲート（GESTURE_WAVEと同じ`d < WAVE_WIDTH`判定）をトリガーにしたアタック/リリース式のエンベロープ（`on_since[]`/`off_since[]`/`off_peak[]`/`gate_prev[]`、`FADE_IN_MS=250`・`FADE_OUT_MS`）を追加。次の列/行が光っている最中に前の列/行がフェードアウトしていく「残像」を実現。
+  - `FADE_OUT_MS`は500→**600**に微調整（「点灯してから消灯するまでの時間をほんの少し長くしてください」との要望）。この値は`keyball.c`の`gesture_wave_duration_ms()`（スロットの有効期限＝`WAVE_MS + FADE_OUT_MS`）とも手動で同期させる必要がある（コメントで相互参照済み）。
+  - **左右にボールを振った時のLED発光が縦方向より小さく見える件を調査**: `keyball39.c`の`g_led_config.point[]`実測により、片側基板内のx座標(横)の範囲が約84-87・y座標(縦)の範囲が約55-64で、横方向のレンジが縦方向の約1.4倍あることが判明。固定`WAVE_WIDTH=20`だと横方向では進行距離に対する帯の相対的な太さが縦方向より狭く見える。**修正**: `WAVE_WIDTH_V=20`（縦・上下方向）／`WAVE_WIDTH_H=28`（横・左右方向）に分離し、スロットの`dir`(2,3が左右)で選択。`GESTURE_WAVE()`・`TRACKBALL_BREATH()`両方、keyball39・keyballplus両ファイルに反映。
+  - **連続フリック時の上書き挙動を一時的に変更→撤回**: 「何度もフリックした時はどんどんエフェクトを上書きしていくようにしてほしい」との依頼を受け`keyball_gesture_wave_trigger()`の「既存スロットがactiveなら次の発火を無視する」ガードを一度削除したが、直後に本人から「やっぱり連続フリックの上書きは無しでお願いします」と撤回依頼があり、**元のガード（前のウェーブ表示中は次の発火を無視する）に戻した**。今後同じ提案をしても一度試して不採用になった経緯として記録。
+- `qmk compile`（keyball39・keyballplus）・`npm run update-firmware`いずれも成功。
+- **本人が実機で動作確認し「動作確認OKでした」と確認済み**（2026-09-30）。シャープ・ブリージング両方の見た目、左右/上下ジェスチャー、連続フリック時に前のウェーブが終わるまで次が発動しない挙動、いずれも問題なし。
+- **未コミット**。次回このセッションに引き継ぐ場合、本人にコミット・push可否を確認してから実行すること。あわせて`~/keyball-configurator/src/components/FirmwareFlasher/FirmwareFlasher.tsx`の`RP2040_PUBLIC_RELEASE`が実機確認用に一時的に`true`のままになっている点も、本番デプロイ前に`false`へ戻す必要がある。
 
 ---
 
