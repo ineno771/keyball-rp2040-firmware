@@ -211,10 +211,20 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
         *phase     = (uint8_t)((*phase + 1) % count);
     }
 
+    HSV base = rgb_matrix_config.hsv;
     for (uint8_t i = led_min; i < led_max; i++) {
-        uint8_t slot = (uint8_t)(((i - led_min) + *phase) % count);
-        HSV     out  = {hues[slot], rgb_matrix_config.hsv.s, rgb_matrix_config.hsv.v};
-        RGB     rgb  = rgb_matrix_hsv_to_rgb(out);
+        HSV out;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時、設定色そのまま点灯し続ける（他のトラックボール系
+            // エフェクトと同じ扱い。2026-10-01修正: 以前はここも市松模様のテーマカラーで
+            // 上書きしていたため、ハロウィン等を選ぶとアンダーグローまで本来の設定色から
+            // 離れたテーマカラーに変わってしまっていた）。
+            out = base;
+        } else {
+            uint8_t slot = (uint8_t)(((i - led_min) + *phase) % count);
+            out          = (HSV){hues[slot], base.s, base.v};
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
 }
