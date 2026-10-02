@@ -783,15 +783,10 @@ static void render_tiered_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES],
     oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
 }
 
-// 現在の「熱量」を0-3の段階に変換する。熱量自体の計算はkeyball.cの
-// keyball_get_typing_heat_combined()に一本化した（2026-10-02）。以前はここで
-// g_last_hit_tracker（両ハーフそれぞれローカルに更新される）からローカルに計算
-// していたが、スレーブ側のOLEDはスレーブ自身の物理キーしか見えないため、主に
-// マスター側で入力している時はスレーブ側の表示が全く反応しない（本人指摘）
-// 問題があった。マスターの熱量をRPCでスレーブへ送り合算する実装に変更したことで、
-// どちらのハーフで打っても両ハーフのOLEDが反応するようになっている。
+// 現在の「熱量」を0-3の段階に変換する。熱量の計算はkeyball.cの
+// keyball_get_typing_heat()（このハーフ自身の打鍵のみが対象）。
 static uint8_t heatmap_tier_from_typing(void) {
-    return keyball_get_typing_heat_combined() / 64;  // 0-255を4段階(0-3)に変換
+    return keyball_get_typing_heat() / 64;  // 0-255を4段階(0-3)に変換
 }
 #endif
 

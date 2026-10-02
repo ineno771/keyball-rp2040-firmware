@@ -742,7 +742,7 @@ static void rpc_gesture_wave_invoke(void) {
 #ifdef RGB_MATRIX_ENABLE
 // 自分のハーフの「打鍵の熱量」(0-255)を計算・更新して返す。keymap.cの
 // heatmap_tier_from_typing()が以前ローカルに持っていた実装をそのまま移設したもの
-// （2026-10-02、両ハーフ合算対応のため共有可能な場所へ移動）。g_last_hit_tracker
+// （2026-10-02移設）。g_last_hit_tracker
 // （両ハーフでそれぞれローカルに更新されるQMK本体のグローバル変数）が入力元のため、
 // この関数自体もマスター・スレーブそれぞれで独立した静的状態を持って呼ばれる想定
 // （LED側のper-key HEATMAP()エフェクトとは別の、単一スカラー値の蓄熱・減衰ロジック）。
@@ -768,34 +768,11 @@ static uint8_t keyball_typing_heat_local(void) {
     return heat;
 }
 
-uint8_t keyball_get_typing_heat_combined(void) {
-    return keyball.typing_heat_combined;
-}
-
-typedef struct {
-    uint8_t heat;
-} typing_heat_rpc_t;
-
-// スレーブ側で実行される。マスターから届いた熱量と自分（スレーブ）のローカル熱量を
-// 合算してkeyball.typing_heat_combinedへ書き込む。OLEDのタイピングヒートマップは
-// スレーブ側でしか描画しない（keymap.c参照）ため、ここでしか値を更新しない。
-static void rpc_typing_heat_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    const typing_heat_rpc_t *req = (const typing_heat_rpc_t *)in_data;
-    uint16_t                 sum = (uint16_t)keyball_typing_heat_local() + req->heat;
-    keyball.typing_heat_combined = (sum > 255) ? 255 : (uint8_t)sum;
-}
-
-// マスター側で実行される。自分（マスター）のローカル熱量を定期的にスレーブへ送る
-// （本人希望「両ハーフどちらで打っても反応してほしい」、2026-10-02）。
-static void rpc_typing_heat_invoke(void) {
-    static uint32_t last_sync = 0;
-    uint32_t        now       = timer_read32();
-    if (TIMER_DIFF_32(now, last_sync) < KEYBALL_TX_TYPING_HEAT_INTERVAL) {
-        return;
-    }
-    last_sync             = now;
-    typing_heat_rpc_t req = {.heat = keyball_typing_heat_local()};
-    transaction_rpc_send(KEYBALL_TYPING_HEAT, sizeof(req), &req);
+// 2026-10-02: 両ハーフ合算のため専用RPC(KEYBALL_TYPING_HEAT)を一度追加したが、
+// 導入直後にトラックボールが反応しなくなる不具合が出たため取り消した。現在は
+// このハーフ自身の打鍵だけを見る（v0.4.1と同じ挙動）。
+uint8_t keyball_get_typing_heat(void) {
+    return keyball_typing_heat_local();
 }
 #endif
 
@@ -1301,9 +1278,6 @@ void keyboard_post_init_kb(void) {
 #ifdef GESTURE_ENABLE
         transaction_register_rpc(KEYBALL_GESTURE_WAVE, rpc_gesture_wave_handler);
 #endif
-#ifdef RGB_MATRIX_ENABLE
-        transaction_register_rpc(KEYBALL_TYPING_HEAT, rpc_typing_heat_handler);
-#endif
     }
 #endif
 
@@ -1353,9 +1327,6 @@ void housekeeping_task_kb(void) {
         }
 #ifdef GESTURE_ENABLE
         rpc_gesture_wave_invoke();
-#endif
-#ifdef RGB_MATRIX_ENABLE
-        rpc_typing_heat_invoke();
 #endif
     }
     // ウェーブのオーバーライド判定は両ハーフが自分のLED表示について独立に決めるため、
