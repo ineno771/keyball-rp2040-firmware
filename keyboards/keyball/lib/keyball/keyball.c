@@ -219,7 +219,9 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
 typedef struct {
     int32_t  v0x_fp, v0y_fp;                      // 滑走開始時の速度（1/256カウント単位）
     int32_t  accx_fp, accy_fp;                    // 1カウント未満の端数の持ち越し（1/256カウント単位）
-    uint16_t coast_frames;                        // 今回の滑走の総フレーム数（強さで決まる）
+    uint16_t coast_frames;                        // 今回の滑走の総フレーム数（フリックの速さと強さで決まる）
+    int32_t  ema_x_fp, ema_y_fp;                  // 直近数フレームを均したボールの速さ（1/256カウント単位）
+    int32_t  flick_x_fp, flick_y_fp;              // 今の一連の動きでの均した速さの最大値＝フリックの速さ
     uint16_t coast_frame;                         // 滑走開始から何フレーム経ったか
     int16_t  peak_vx, peak_vy;                    // 今の一連の動きで観測した最大速度（フリックの勢い）
     int16_t  prev_remainder_x, prev_remainder_y;  // 前回消費後にm->x/m->yへ残っていたはずの値
@@ -234,19 +236,23 @@ typedef struct {
 #define KEYBALL_SCROLL_INERTIA_MAX_COAST_MS 3000
 
 // 滑走の仕方（2026-10-02作り直し、本人指摘「強さ1でもまだ強い」「速く滑ってビタっと
-// 止まる。徐々に減速してほしい」）。以前は「ピーク速度×3を初速にして指数減衰」だった。
-// 初速が手の速さの3倍から始まるため強さに関係なく急加速し、指数減衰は直後に急減速した
-// 上に、終盤の速度が1目盛り未満になって見えなくなるため「ビタっと止まる」ように感じた。
-// 今は「離した時の速さ×倍率」から始めて、決まったフレーム数をかけて一定の割合で速度を
-// 0まで落とす（直線的な減速＝最後まで徐々に遅くなって止まる）。呼び出し周期は
-// KEYBALL_REPORTMOUSE_INTERVAL（8ms＝125Hz）。
-// 強さ(0-KB_SCROLL_INERTIA_STRENGTH_MAX)は滑走時間と初速倍率の両方に効く。滑走時間は
-// (強さ²+強さ)に比例するカーブで割り当て、弱い側ほど細かく調整できるようにしている
-// （強さ1≈56ms、8≈420ms、15≈1.3秒）。
-#define KEYBALL_SCROLL_INERTIA_FRAMES_MIN    6    // 強さ0: 約50msで止まる
-#define KEYBALL_SCROLL_INERTIA_FRAMES_MAX    160  // 強さ最大: 約1.3秒かけて止まる
-#define KEYBALL_SCROLL_INERTIA_START_X16_MIN 16   // 初速倍率×16（強さ0: 離した時と同じ速さ）
-#define KEYBALL_SCROLL_INERTIA_START_X16_MAX 32   // 強さ最大: 離した時の2倍
+// 止まる。徐々に減速してほしい」「慣性のスクロール速度が速すぎる。フリック時の
+// スピードも考慮してほしい」）。以前は「ピーク速度×3を初速にして指数減衰」だった。
+// 今は摩擦のように一定の割合で減速する:
+//  ・初速＝フリックの速さそのもの（倍率はかけない）。フリックの速さは1フレーム(8ms)の
+//    瞬間最大値ではなく、直近数フレームを均した速さの最大値を使う（瞬間値はトゲが
+//    出やすく、手で弾いた体感より速く滑り出してしまうため）。
+//  ・減速の度合いは強さで決まり、フリックの速さに関係なく一定。そのため、ゆっくり
+//    弾けばすぐ止まり、速く弾くほど長く・遠くまで滑る。
+//  ・速度は最後まで一定の割合で落ちて0になる（徐々に遅くなって止まる）。
+// 強さは「基準の速さ(KEYBALL_SCROLL_INERTIA_REF_X10×分周値/10、既定の発動しきい値と
+// 同じ速さ)で弾いた時に止まるまでのフレーム数」として(強さ²+強さ)に比例するカーブで
+// 割り当て、弱い側ほど細かく調整できるようにしている（強さ1≈56ms、8≈420ms、15≈1.3秒。
+// 呼び出し周期はKEYBALL_REPORTMOUSE_INTERVAL＝8ms）。
+#define KEYBALL_SCROLL_INERTIA_FRAMES_MIN 6    // 強さ0
+#define KEYBALL_SCROLL_INERTIA_FRAMES_MAX 160  // 強さ最大
+#define KEYBALL_SCROLL_INERTIA_FRAMES_CAP 300  // 1回の滑走の上限（約2.4秒）
+#define KEYBALL_SCROLL_INERTIA_REF_X10    25   // 基準の速さ＝分周値×2.5/フレーム
 
 // 慣性を発動させる最低速度（base_divの倍数）。ゆっくり意図的にスクロール
 // している時は発動させたくない、速く弾いた時だけ発動してほしい、という
@@ -334,14 +340,25 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
         // 続け、今回はゆっくり上にスクロールしたつもりが、古い「下方向への
         // 速い動き」のピークがまだ大きいという理由で下方向に滑ってしまう、
         // 上下（または左右）が逆転する不具合の原因になっていた。
+        int32_t sample_x_fp = (int32_t)(m->x - inertia->prev_remainder_x) * 256;
+        int32_t sample_y_fp = (int32_t)(m->y - inertia->prev_remainder_y) * 256;
         if (!inertia->streak_active) {
-            inertia->peak_vx = 0;
-            inertia->peak_vy = 0;
+            inertia->peak_vx    = 0;
+            inertia->peak_vy    = 0;
+            inertia->ema_x_fp   = sample_x_fp;
+            inertia->ema_y_fp   = sample_y_fp;
+            inertia->flick_x_fp = 0;
+            inertia->flick_y_fp = 0;
+        } else {
+            inertia->ema_x_fp += (sample_x_fp - inertia->ema_x_fp) / 2;
+            inertia->ema_y_fp += (sample_y_fp - inertia->ema_y_fp) / 2;
         }
         inertia->streak_active = true;
         inertia->coasting      = false;
         if (abs(m->x) > abs(inertia->peak_vx)) inertia->peak_vx = m->x;
         if (abs(m->y) > abs(inertia->peak_vy)) inertia->peak_vy = m->y;
+        if (labs(inertia->ema_x_fp) > labs(inertia->flick_x_fp)) inertia->flick_x_fp = inertia->ema_x_fp;
+        if (labs(inertia->ema_y_fp) > labs(inertia->flick_y_fp)) inertia->flick_y_fp = inertia->ema_y_fp;
     } else {
         // 新規入力なし: 一連の動きは途切れた。次にnew_inputになった時は
         // 新しい一連の動きとしてピークを取り直す（上のstreak_activeの
@@ -359,16 +376,21 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
             // 複数フレームかけて蓄積しいずれ分周値を超えた時点で正しくスクロールが
             // 発生する（これが最後の「徐々に遅くなる」部分）。
             if (!inertia->coasting) {
-                // 滑走開始: 強さから滑走時間と初速倍率を決め、ピーク速度（離す直前の
-                // 一連の動きで一番速かった瞬間）×倍率を初速にする。
-                uint32_t st    = kb_scroll_inertia_strength_get();
-                uint32_t st_mx = KB_SCROLL_INERTIA_STRENGTH_MAX;
-                inertia->coast_frames = KEYBALL_SCROLL_INERTIA_FRAMES_MIN +
-                                        (uint16_t)((KEYBALL_SCROLL_INERTIA_FRAMES_MAX - KEYBALL_SCROLL_INERTIA_FRAMES_MIN) * (st * st + st) / (st_mx * st_mx + st_mx));
-                int32_t start_x16 = KEYBALL_SCROLL_INERTIA_START_X16_MIN +
-                                    (int32_t)((KEYBALL_SCROLL_INERTIA_START_X16_MAX - KEYBALL_SCROLL_INERTIA_START_X16_MIN) * st / st_mx);
-                inertia->v0x_fp           = (int32_t)inertia->peak_vx * start_x16 * 16;  // ×16÷16×256
-                inertia->v0y_fp           = (int32_t)inertia->peak_vy * start_x16 * 16;
+                // 滑走開始: 初速はフリックの速さそのもの。止まるまでのフレーム数は
+                // 「強さで決まる基準フレーム数 × フリックの速さ÷基準の速さ」
+                // （一定の割合で減速するので、速いほど長く滑る）。
+                uint32_t st       = kb_scroll_inertia_strength_get();
+                uint32_t st_mx    = KB_SCROLL_INERTIA_STRENGTH_MAX;
+                uint32_t ref_frms = KEYBALL_SCROLL_INERTIA_FRAMES_MIN +
+                                    (KEYBALL_SCROLL_INERTIA_FRAMES_MAX - KEYBALL_SCROLL_INERTIA_FRAMES_MIN) * (st * st + st) / (st_mx * st_mx + st_mx);
+                int32_t  ref_fp   = (int32_t)base_div * KEYBALL_SCROLL_INERTIA_REF_X10 * 256 / 10;
+                int32_t  speed_fp = labs(inertia->flick_x_fp) + labs(inertia->flick_y_fp);
+                uint32_t frames   = (uint32_t)((int64_t)ref_frms * speed_fp / (ref_fp > 0 ? ref_fp : 1));
+                if (frames < 1) frames = 1;
+                if (frames > KEYBALL_SCROLL_INERTIA_FRAMES_CAP) frames = KEYBALL_SCROLL_INERTIA_FRAMES_CAP;
+                inertia->coast_frames     = (uint16_t)frames;
+                inertia->v0x_fp           = inertia->flick_x_fp;
+                inertia->v0y_fp           = inertia->flick_y_fp;
                 inertia->accx_fp          = 0;
                 inertia->accy_fp          = 0;
                 inertia->coast_frame      = 0;
