@@ -298,6 +298,15 @@
 - **本人が実機で動作確認し「動作確認OKでした」と確認済み**（2026-09-30）。シャープ・ブリージング両方の見た目、左右/上下ジェスチャー、連続フリック時に前のウェーブが終わるまで次が発動しない挙動、いずれも問題なし。
 - **未コミット**。次回このセッションに引き継ぐ場合、本人にコミット・push可否を確認してから実行すること。あわせて`~/keyball-configurator/src/components/FirmwareFlasher/FirmwareFlasher.tsx`の`RP2040_PUBLIC_RELEASE`が実機確認用に一時的に`true`のままになっている点も、本番デプロイ前に`false`へ戻す必要がある。
 
+### 2026-09-30〜2026-10-02: ジェスチャーウェーブのモード別設定・OLEDアニメーション刷新・アンダーグロー修正（v0.2.0〜v0.4.4、実機確認OK・コミット済み）
+- 上の2026-09-29エントリの内容はv0.2.0としてコミット・デプロイ済み（「未コミット」の記載は解消）。`RP2040_PUBLIC_RELEASE`は`rp2040`ブランチでは常に`true`、`main`では`false`の運用（configurator側）。
+- **v0.3.0 ジェスチャーウェーブの速さ・見た目・色をジェスチャーモード1〜4ごとに個別設定**: EEPROMを配列化（速さ`0x0AB6-0x0AB9`、見た目`0x0ABA-0x0ABD`、色hue/sat/val×4`0x0ABE-0x0AC9`、色の保存済み目印`0x0ACA-0x0ACD`。旧アドレス`0x0A42`/`0x0AB1-0x0AB5`は放棄。次に追加するなら`0x0ACE`から）。HIDは`[cmd, mode, ...]`形式に変更。発火元`keyball_gesture_wave_trigger(dir, mode)`がモードの値を解決し、`gesture_wave_rpc_t`でスレーブへ配る。
+- **v0.4.0 OLEDアニメーション**: 本人提供の`~/Desktop/export/keyball_oled_anim/`から4種差し替え・7種追加（計11種、`lib/oledkit/frames/anim_*.h`）。万華鏡はWeb UIで選べるエフェクトに対応が無いため本人指示で「リアクティブ」に割り当て（スネークはUI非表示のため不可）。
+- **ハロウィン等(市松模様)のアンダーグロー**: 最終的に「テーマ固有の色相(`hues[0]`)固定、彩度・明るさはスライダーに従う」（v0.4.2）。一度スライダーの色相に追従させたが、キー側と配色が揃わず本人が元に戻すことを希望。
+- **ジェスチャーウェーブ時にアンダーグローの色が変わる問題（本人が最初から指摘していた件）**: 根本原因は、ウェーブ中にRGB_MATRIXモード自体をGESTURE_WAVEへ切り替えていたこと。ウェーブ側でアンダーグローの色を決める必要があり、レイヤー0の色・表示中レイヤーの色のどちらでも直前の表示とずれた。**v0.4.4で重ね描き方式に変更**: `keymap.c`の`rgb_matrix_indicators_advanced_user`→`rgb_matrix_user.inc`の`keyball_gesture_wave_overlay()`が今のエフェクトの上にキーのLEDだけ描く（アンダーグローは触らない）。LEDオフ設定中だけ従来通りモードを切り替える（`keyball_gesture_wave_overriding()`はこの時のみtrue。`keyball_gesture_wave_drawing()`は表示中ずっとtrue）。実機確認OK。
+- **タイピングヒートマップOLED**: 360コマ=90コマ×4段階として打鍵量で段階を切り替える版(v0.4.1)を作ったが、スレーブのOLEDはスレーブ側のキーにしか反応せず「ランダムに見える」と指摘された。両ハーフ合算のため定期RPC(`KEYBALL_TYPING_HEAT`)を追加したv0.4.2で**トラックボールが反応しなくなった**（キー入力は正常、両ハーフ書き込み済み）。RPCを外したv0.4.3で復旧したので原因は確定（仕組みは未特定。モーションも同じ通信路でスレーブ→マスターへ4ms間隔で送られている）。本人了承のもと、打鍵に連動しない通常ループ再生(v0.4.0と同じ)に戻した。**今後、ハーフ間の定期RPCは安易に追加しないこと。**
+- **保留（本人指示）**: 「トラックボール回転量・キー入力・レイヤー状態を表示するOLEDアニメーションと既存表示の切り替え」は、提供ファイルに該当アニメーションが含まれていなかったため保留。
+
 ---
 
 ## 5. 主要ファイル
@@ -314,6 +323,7 @@
 ---
 
 ## 6. ビルド環境（このデバイス）
+- **2026-10-02時点の実際のビルドツリーは`~/qmk_firmware-keyball-rp2040`（git worktree）**。`~/qmk_firmware`はv0.1.0のまま止まった古いツリーなので使わないこと。以下の手順中の`~/qmk_firmware`は読み替える。ビルド後は`~/qmk_firmware-keyball-rp2040/*.uf2`を`~/keyball-configurator/public/firmware/`へコピーする。
 - QMK Firmware本体: `~/qmk_firmware`（ベースコミット`594558ec7b9ac1963870447778426682065e0d20`、2つのパッチ適用済み）
 - RP2040向けビルドに必要な `arm-none-eabi-gcc` は `brew`（`osx-cross/arm` tap）でインストール・修復済み。
 - ビルド時は毎回、`keyboards/keyball` 一式を `~/keyball-rp2040-firmware` から `~/qmk_firmware/keyboards/` にコピーしてから `qmk compile -kb keyball/keyball39 -km web_configurator` を実行する運用（keyball-plus-firmwareと同じパターン）。
