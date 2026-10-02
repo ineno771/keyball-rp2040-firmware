@@ -217,7 +217,10 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_move(keyball_motion_
 // 代わりに「前回この関数を抜けた時点でm->x/m->yに残っていたはずの値」を
 // 覚えておき、そこから変化していない場合だけ「新規入力なし」と判定する。
 typedef struct {
-    int16_t  vx, vy;                              // 滑走中の速度（減衰していく値）
+    int32_t  v0x_fp, v0y_fp;                      // 滑走開始時の速度（1/256カウント単位）
+    int32_t  accx_fp, accy_fp;                    // 1カウント未満の端数の持ち越し（1/256カウント単位）
+    uint16_t coast_frames;                        // 今回の滑走の総フレーム数（強さで決まる）
+    uint16_t coast_frame;                         // 滑走開始から何フレーム経ったか
     int16_t  peak_vx, peak_vy;                    // 今の一連の動きで観測した最大速度（フリックの勢い）
     int16_t  prev_remainder_x, prev_remainder_y;  // 前回消費後にm->x/m->yへ残っていたはずの値
     bool     coasting;                            // 現在、慣性で滑っている最中か
@@ -230,34 +233,20 @@ typedef struct {
 // なる不具合の再発防止）。
 #define KEYBALL_SCROLL_INERTIA_MAX_COAST_MS 3000
 
-// 減衰の時定数（フレーム数、呼び出し周期はKEYBALL_REPORTMOUSE_INTERVAL≒8ms＝125Hz）。
-// strength(0-KB_SCROLL_INERTIA_STRENGTH_MAX)からこの範囲へ線形に写像する。
-// 【注意】以前は「decay_num = 200 + strength*55/254」という、decay_num
-// （0.78〜0.996）自体をstrengthに対して線形に変化させる式だった。しかし
-// 減衰の体感速度はdecay_numそのものではなく「256に対する近さ」に対して
-// 指数的に効くため、この式だとstrength=128（デフォルト）でも半減期が
-// 125Hz換算で約8フレーム＝60ms強しかなく、スライダーの下から中間あたり
-// まではほぼ「即座に止まる」にしか感じられず、上位ごく一部でしか
-// 「徐々に弱まる」効果が出ていなかった（本人指摘で発覚）。
-// 代わりに時定数(フレーム数)をstrengthに対して線形にし、decay_numは
-// gap=256/tauから逆算する（decay_num=256-gapならおよそ1/e減衰までtau
-// フレームかかる）ことで、スライダーのどの位置でも変化が均等に体感できる
-// ようにする。
-// 【2026-09-17再調整】上記の減衰時間の修正とは別に、「最大設定でも強すぎる」との
-// 指摘を受け、スライダーの最大値をKB_SCROLL_INERTIA_STRENGTH_MAX=254→15に
-// 縮小するのに合わせて、最大時の時定数自体も180→80フレームに下げ、初速の
-// ブースト倍率も4→3に下げた（下のKEYBALL_SCROLL_INERTIA_BOOST）。実機未確認の
-// 見積もり値なので、まだ強い/弱いと感じたらこの2つの数値を再調整すること。
-#define KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES 2   // strength=0: ほぼ即座に止まる
-#define KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES 80  // strength=最大: 長めに滑る（約640msの時定数）
-
-// 滑走開始時、観測したピーク速度にかけるブースト倍率。生の値をそのまま
-// 使うと分周値(base_div)に対して小さすぎて、実際に目に見えるスクロールに
-// ならないことがあったため（h/vが±1にしかならず、体感できるほど動かない）。
-// 倍率が大きいほど「同じ速さで弾いても遠くまで/大きく」滑るようになり、かつ
-// ピーク速度そのものに比例するため、ボールを速く回すほど強く滑るようになる。
-// （strengthの値に関わらず一律にかかる。2026-09-17: 4→3に下げた）
-#define KEYBALL_SCROLL_INERTIA_BOOST 3
+// 滑走の仕方（2026-10-02作り直し、本人指摘「強さ1でもまだ強い」「速く滑ってビタっと
+// 止まる。徐々に減速してほしい」）。以前は「ピーク速度×3を初速にして指数減衰」だった。
+// 初速が手の速さの3倍から始まるため強さに関係なく急加速し、指数減衰は直後に急減速した
+// 上に、終盤の速度が1目盛り未満になって見えなくなるため「ビタっと止まる」ように感じた。
+// 今は「離した時の速さ×倍率」から始めて、決まったフレーム数をかけて一定の割合で速度を
+// 0まで落とす（直線的な減速＝最後まで徐々に遅くなって止まる）。呼び出し周期は
+// KEYBALL_REPORTMOUSE_INTERVAL（8ms＝125Hz）。
+// 強さ(0-KB_SCROLL_INERTIA_STRENGTH_MAX)は滑走時間と初速倍率の両方に効く。滑走時間は
+// (強さ²+強さ)に比例するカーブで割り当て、弱い側ほど細かく調整できるようにしている
+// （強さ1≈56ms、8≈420ms、15≈1.3秒）。
+#define KEYBALL_SCROLL_INERTIA_FRAMES_MIN    6    // 強さ0: 約50msで止まる
+#define KEYBALL_SCROLL_INERTIA_FRAMES_MAX    160  // 強さ最大: 約1.3秒かけて止まる
+#define KEYBALL_SCROLL_INERTIA_START_X16_MIN 16   // 初速倍率×16（強さ0: 離した時と同じ速さ）
+#define KEYBALL_SCROLL_INERTIA_START_X16_MAX 32   // 強さ最大: 離した時の2倍
 
 // 慣性を発動させる最低速度（base_divの倍数）。ゆっくり意図的にスクロール
 // している時は発動させたくない、速く弾いた時だけ発動してほしい、という
@@ -363,39 +352,45 @@ __attribute__((weak)) void keyball_on_apply_motion_to_mouse_scroll(keyball_motio
             // 慣性ON・ピーク速度が「速く弾いた」と言えるレベルに達している
             // （またはすでに滑走中）: 減衰させながら滑らせる。
             //
-            // 注意（重要）: 滑走を開始した後の継続・停止判定はpeak_vxではなく
-            // inertia->vx（滑走中に減衰していく値）を見る。継続判定にmin_flick
-            // のようなbase_div基準のしきい値を使うと、減衰の終盤（base_div未満）
-            // で強制停止してしまうが、下でm->xに「代入」ではなく「加算」して
-            // いるため、base_div未満の速度でも複数フレームかけて蓄積しいずれ
-            // 分周値を超えた時点で正しくスクロールが発生する。継続判定を厳しく
-            // すると、この「小さい速度が時間をかけて発生する」ケースを潰して
-            // しまう。
+            // 注意（重要）: 滑走を開始した後の停止判定は速度のしきい値ではなく
+            // 経過フレーム数(coast_frames)で行う。min_flickのようなbase_div基準の
+            // しきい値で止めると、減速の終盤（base_div未満）で強制停止してしまうが、
+            // 下でm->xに「代入」ではなく「加算」しているため、base_div未満の速度でも
+            // 複数フレームかけて蓄積しいずれ分周値を超えた時点で正しくスクロールが
+            // 発生する（これが最後の「徐々に遅くなる」部分）。
             if (!inertia->coasting) {
-                // 滑走開始: ピーク速度にブースト倍率をかけたものを初速にする
-                // （本人希望：ボールの回転の速さで慣性の効きを変える。速く
-                // 弾くほどピーク速度が大きく、より強く・長く滑るように
-                // なる）。
-                inertia->vx = keyball_clip_int16((int32_t)inertia->peak_vx * KEYBALL_SCROLL_INERTIA_BOOST);
-                inertia->vy = keyball_clip_int16((int32_t)inertia->peak_vy * KEYBALL_SCROLL_INERTIA_BOOST);
+                // 滑走開始: 強さから滑走時間と初速倍率を決め、ピーク速度（離す直前の
+                // 一連の動きで一番速かった瞬間）×倍率を初速にする。
+                uint32_t st    = kb_scroll_inertia_strength_get();
+                uint32_t st_mx = KB_SCROLL_INERTIA_STRENGTH_MAX;
+                inertia->coast_frames = KEYBALL_SCROLL_INERTIA_FRAMES_MIN +
+                                        (uint16_t)((KEYBALL_SCROLL_INERTIA_FRAMES_MAX - KEYBALL_SCROLL_INERTIA_FRAMES_MIN) * (st * st + st) / (st_mx * st_mx + st_mx));
+                int32_t start_x16 = KEYBALL_SCROLL_INERTIA_START_X16_MIN +
+                                    (int32_t)((KEYBALL_SCROLL_INERTIA_START_X16_MAX - KEYBALL_SCROLL_INERTIA_START_X16_MIN) * st / st_mx);
+                inertia->v0x_fp           = (int32_t)inertia->peak_vx * start_x16 * 16;  // ×16÷16×256
+                inertia->v0y_fp           = (int32_t)inertia->peak_vy * start_x16 * 16;
+                inertia->accx_fp          = 0;
+                inertia->accy_fp          = 0;
+                inertia->coast_frame      = 0;
                 inertia->peak_vx          = 0;
                 inertia->peak_vy          = 0;
                 inertia->coast_started_at = timer_read32();
             }
             inertia->coasting = true;
-            uint16_t tau = KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES +
-                           (uint16_t)((uint32_t)kb_scroll_inertia_strength_get() *
-                                      (KEYBALL_SCROLL_INERTIA_TAU_MAX_FRAMES - KEYBALL_SCROLL_INERTIA_TAU_MIN_FRAMES) /
-                                      KB_SCROLL_INERTIA_STRENGTH_MAX);
-            uint16_t decay_num = 256 - (256 / tau);
-            m->x               = add16(m->x, inertia->vx);
-            m->y               = add16(m->y, inertia->vy);
-            inertia->vx        = (int16_t)(((int32_t)inertia->vx * decay_num) / 256);
-            inertia->vy        = (int16_t)(((int32_t)inertia->vy * decay_num) / 256);
-            if (abs(inertia->vx) + abs(inertia->vy) < 1 ||
+            // 残りフレーム数に比例した速度＝一定の割合で減速して最後に0になる。
+            // 1カウント未満の端数は次フレームへ持ち越すので、遅くなっても途中で途切れない。
+            int32_t left = (int32_t)(inertia->coast_frames - inertia->coast_frame);
+            inertia->accx_fp += inertia->v0x_fp * left / inertia->coast_frames;
+            inertia->accy_fp += inertia->v0y_fp * left / inertia->coast_frames;
+            int32_t out_x = inertia->accx_fp / 256;
+            int32_t out_y = inertia->accy_fp / 256;
+            inertia->accx_fp -= out_x * 256;
+            inertia->accy_fp -= out_y * 256;
+            m->x = add16(m->x, keyball_clip_int16(out_x));
+            m->y = add16(m->y, keyball_clip_int16(out_y));
+            inertia->coast_frame++;
+            if (inertia->coast_frame >= inertia->coast_frames ||
                 TIMER_DIFF_32(timer_read32(), inertia->coast_started_at) > KEYBALL_SCROLL_INERTIA_MAX_COAST_MS) {
-                inertia->vx       = 0;
-                inertia->vy       = 0;
                 inertia->coasting = false;
             }
         }

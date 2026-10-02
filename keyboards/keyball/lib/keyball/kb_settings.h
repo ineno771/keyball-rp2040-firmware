@@ -260,8 +260,8 @@ void            kb_led_config_set(const kb_led_config_t *cfg);
 #define KB_SCROLL_INERTIA_STRENGTH_EEPROM  0x0A17  // 強さ（1バイト）
 #define KB_SCROLL_INERTIA_STRENGTH_MIN     0
 // 【注意】以前は254だったが、実機で最大値付近が強すぎるとの指摘があり15に縮小した
-// （2026-09-17）。減衰の時定数計算(keyball.cのkeyball_on_apply_motion_to_mouse_scroll)
-// はこの値に対して比例計算しているため、ここを変えるだけで自動的に追従する。
+// （2026-09-17）。滑走時間・初速倍率の計算(keyball.cのkeyball_on_apply_motion_to_mouse_scroll)
+// はこの値を基準に割合で計算しているため、ここを変えるだけで自動的に追従する。
 #define KB_SCROLL_INERTIA_STRENGTH_MAX     15
 #define KB_SCROLL_INERTIA_STRENGTH_DEFAULT 8
 
