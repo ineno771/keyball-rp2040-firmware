@@ -76,6 +76,9 @@ RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 // rgb_matrix.cの時点ではまだincludeされていないため先に読み込んでおく。
 #include "report.h"
 #include "lib/keyball/keyball.h"
+// GESTURE_WAVE/TRACKBALL_BREATHがアンダーグロー用に「通常」LED設定(kb_led_config_get)を
+// 読むために必要（2026-10-02追加）。
+#include "lib/keyball/kb_settings.h"
 
 static bool LED_TEST(effect_params_t* params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
@@ -634,12 +637,25 @@ static bool GESTURE_WAVE(effect_params_t* params) {
     const uint8_t WAVE_WIDTH_V = 20;  // 上下方向
     const uint8_t WAVE_WIDTH_H = 28;  // 左右方向
 
-    HSV base = rgb_matrix_config.hsv;
+    // アンダーグローは「通常(レイヤー0)」LED設定の色を常時表示する。rgb_matrix_config.hsv
+    // を使わない理由: 複数ジェスチャーモードはGST_HOLDキーでレイヤーを一時切替する実装
+    // のため、そのレイヤーにレイヤー連動LEDの色が設定されていると、ジェスチャーモード中は
+    // rgb_matrix_config.hsvがそのレイヤー専用の色になっている。これをそのまま使うと、
+    // ジェスチャーウェーブ発火時にアンダーグローが「本来の通常色ではない、関係のない色」
+    // に見えてしまっていた（2026-10-02、本人指摘により修正。ハロウィン等の基本LED側は
+    // 意図的に対象外＝そちらはrgb_matrix_config.hsvのままで変更しない）。
+    // kb_led_config_tをまるごとローカル変数に受けると、一部フィールド(effect_id/speed)を
+    // 使わないせいでGCCがpacked構造体の読み込みを丸ごと「未使用」と誤検知しビルドが
+    // 失敗した(-Werror=unused-but-set-variable)。フィールドだけをその場で取り出す。
+    kb_led_config_t normal_cfg = kb_led_config_get();
+    HSV             normal_hsv = {normal_cfg.hue, normal_cfg.sat, normal_cfg.val};
     for (uint8_t i = led_min; i < led_max; i++) {
-        HSV out = base;
+        HSV out;
         if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
-            // アンダーグローは常時点灯（他のトラックボール系エフェクトと同じ扱い）
+            out = normal_hsv;
         } else {
+            out.h = 0;
+            out.s = 0;
             out.v = 0;
             for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
                 if (!keyball.gesture_wave_active[s]) continue;
@@ -755,12 +771,19 @@ static bool TRACKBALL_BREATH(effect_params_t* params) {
     static uint16_t off_since[RGB_MATRIX_LED_COUNT];
     static uint8_t  off_peak[RGB_MATRIX_LED_COUNT];
 
-    HSV base = rgb_matrix_config.hsv;
+    // アンダーグローは「通常」LED設定の色を使う。GESTURE_WAVEと同じ理由・同じ修正
+    // （2026-10-02、本人指摘。ジェスチャーモードのレイヤー切替中にrgb_matrix_config.hsv
+    // がそのレイヤー専用の色になっていることがあり、それを使うと「関係のない色」に
+    // 見えてしまっていた）。
+    kb_led_config_t normal_cfg = kb_led_config_get();
+    HSV             normal_hsv = {normal_cfg.hue, normal_cfg.sat, normal_cfg.val};
     for (uint8_t i = led_min; i < led_max; i++) {
-        HSV out = base;
+        HSV out;
         if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
-            // アンダーグローは常時点灯（GESTURE_WAVEと同じ扱い）
+            out = normal_hsv;
         } else {
+            out.h = 0;
+            out.s = 0;
             out.v = 0;  // 基本は消灯（GESTURE_WAVEと同じ。常時点灯はアンダーグローのみ）
 
             // 帯の範囲に入っているかどうかの判定はGESTURE_WAVEと全く同じ式を使う。

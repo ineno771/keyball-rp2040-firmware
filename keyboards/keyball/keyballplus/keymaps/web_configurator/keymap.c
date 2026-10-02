@@ -846,6 +846,43 @@ static void render_seasonal_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES
     oled_set_cursor(0, 0);
     oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
 }
+
+// タイピングヒートマップ専用: 360フレームは「90フレームずつの4段階（弱い火→中→強い→
+// 最大）」のループ構成のため、段階(tier 0-3)を選んでその範囲だけをループ再生する
+// （2026-10-02、本人希望「タイピングをしだすと炎が燃え盛り、入力が続けば続くほど
+// 激しくなる」に対応）。
+static void render_tiered_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES], uint16_t frames_per_tier, uint8_t tier) {
+    uint16_t base = (uint16_t)tier * frames_per_tier;
+    uint16_t idx  = base + (uint16_t)((timer_read() / KB_ANIM_FRAME_MS) % frames_per_tier);
+    oled_set_cursor(0, 0);
+    oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
+}
+
+// 現在の「熱量」を実際の打鍵から計算し、0-3の段階に変換する。LED側のHEATMAP()
+// エフェクトと同じ入力(g_last_hit_tracker。QMK本体が直近の打鍵を記録しているグローバル
+// 変数で、両ハーフそれぞれローカルに更新される)を使うが、OLED側はLEDごとの蓄熱テーブル
+// までは要らないため、単一のスカラー値として加算・減衰させるだけにしている。
+static uint8_t heatmap_tier_from_typing(void) {
+    static uint8_t  heat            = 0;
+    static uint16_t heat_last_tick  = 0xFFFF;  // g_last_hit_tracker.tickの初期値0と衝突しないよう大きい値で初期化
+    static uint16_t heat_decay_tick = 0;
+
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
+        if (g_last_hit_tracker.tick[j] < heat_last_tick) {
+            uint16_t next = (uint16_t)heat + 24;  // 1打鍵ごとの加算量。8回程度の連続入力で最大段階に達する
+            heat          = (next > 255) ? 255 : (uint8_t)next;  // qadd8と同じ飽和加算(keymap.cからはlib8tionが見えないため自前で)
+        }
+        heat_last_tick = g_last_hit_tracker.tick[j];
+    }
+    if (timer_elapsed(heat_decay_tick) >= 120) {
+        heat_decay_tick = timer_read();
+        if (heat > 0) heat--;
+    }
+    return heat / 64;  // 0-255を4段階(0-3)に変換
+}
 #endif
 
 // スレーブ側（今まで静止ロゴだった側）のロゴを常時アニメーションにする
@@ -874,7 +911,7 @@ void oledkit_render_logo_user(void) {
         // 万華鏡(kaleido)はWeb UIから選べる効果の中に直接対応するものが無いため、
         // 本人指示で「リアクティブ」(REACTIVE_KEYS)に割り当てている。
         case RGB_MATRIX_CUSTOM_REACTIVE_KEYS: render_seasonal_anim_oled(anim_kaleido, KB_ANIM_KALEIDO_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_HEATMAP: render_seasonal_anim_oled(anim_heatmap, KB_ANIM_HEATMAP_FRAMES); handled = true; break;
+        case RGB_MATRIX_CUSTOM_HEATMAP: render_tiered_anim_oled(anim_heatmap, KB_ANIM_HEATMAP_FRAMES / 4, heatmap_tier_from_typing()); handled = true; break;
         case RGB_MATRIX_CUSTOM_RIPPLE: render_seasonal_anim_oled(anim_ripple, KB_ANIM_RIPPLE_FRAMES); handled = true; break;
         default: break;
     }
