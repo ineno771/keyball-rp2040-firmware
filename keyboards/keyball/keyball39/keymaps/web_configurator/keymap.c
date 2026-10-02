@@ -783,30 +783,15 @@ static void render_tiered_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES],
     oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
 }
 
-// 現在の「熱量」を実際の打鍵から計算し、0-3の段階に変換する。LED側のHEATMAP()
-// エフェクトと同じ入力(g_last_hit_tracker。QMK本体が直近の打鍵を記録しているグローバル
-// 変数で、両ハーフそれぞれローカルに更新される)を使うが、OLED側はLEDごとの蓄熱テーブル
-// までは要らないため、単一のスカラー値として加算・減衰させるだけにしている。
+// 現在の「熱量」を0-3の段階に変換する。熱量自体の計算はkeyball.cの
+// keyball_get_typing_heat_combined()に一本化した（2026-10-02）。以前はここで
+// g_last_hit_tracker（両ハーフそれぞれローカルに更新される）からローカルに計算
+// していたが、スレーブ側のOLEDはスレーブ自身の物理キーしか見えないため、主に
+// マスター側で入力している時はスレーブ側の表示が全く反応しない（本人指摘）
+// 問題があった。マスターの熱量をRPCでスレーブへ送り合算する実装に変更したことで、
+// どちらのハーフで打っても両ハーフのOLEDが反応するようになっている。
 static uint8_t heatmap_tier_from_typing(void) {
-    static uint8_t  heat            = 0;
-    static uint16_t heat_last_tick  = 0xFFFF;  // g_last_hit_tracker.tickの初期値0と衝突しないよう大きい値で初期化
-    static uint16_t heat_decay_tick = 0;
-
-    uint8_t cnt = g_last_hit_tracker.count;
-    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
-    for (uint8_t j = 0; j < cnt; j++) {
-        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
-        if (g_last_hit_tracker.tick[j] < heat_last_tick) {
-            uint16_t next = (uint16_t)heat + 24;  // 1打鍵ごとの加算量。8回程度の連続入力で最大段階に達する
-            heat          = (next > 255) ? 255 : (uint8_t)next;  // qadd8と同じ飽和加算(keymap.cからはlib8tionが見えないため自前で)
-        }
-        heat_last_tick = g_last_hit_tracker.tick[j];
-    }
-    if (timer_elapsed(heat_decay_tick) >= 120) {
-        heat_decay_tick = timer_read();
-        if (heat > 0) heat--;
-    }
-    return heat / 64;  // 0-255を4段階(0-3)に変換
+    return keyball_get_typing_heat_combined() / 64;  // 0-255を4段階(0-3)に変換
 }
 #endif
 

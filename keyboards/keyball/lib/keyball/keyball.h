@@ -75,6 +75,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define KEYBALL_TX_GETINFO_INTERVAL 500
 #define KEYBALL_TX_GETMOTION_INTERVAL 4
+// OLEDの見た目だけに使うスカラー値のため、モーションほどの即時性は不要（split busの
+// 負荷を抑えるため緩めの間隔にしている）。
+#define KEYBALL_TX_TYPING_HEAT_INTERVAL 50
 
 #if (PRODUCT_ID & 0xff00) == 0x0000
 #    define KEYBALL_MODEL 46
@@ -259,6 +262,15 @@ typedef struct {
     uint8_t gesture_wave_sat;
     uint8_t gesture_wave_val;
 #endif
+
+#ifdef RGB_MATRIX_ENABLE
+    // OLEDのタイピングヒートマップ用、両ハーフ合算の打鍵熱量(0-255)。マスターが
+    // 自分の熱量をKEYBALL_TYPING_HEAT RPCでスレーブへ送り、スレーブ側のハンドラが
+    // 自分の熱量と合算してここに書き込む（2026-10-02、本人希望「両ハーフどちらで
+    // 打っても反応してほしい」に対応。スレーブ側のRPC受信時にしか更新されないため、
+    // マスター側のこのフィールドは常に未使用のまま＝参照しないこと）。
+    uint8_t typing_heat_combined;
+#endif
 } keyball_t;
 
 typedef enum {
@@ -351,6 +363,14 @@ void keyball_gesture_wave_task(void);
 /// 誤って書き込まないようにするために使う。
 bool keyball_gesture_wave_overriding(void);
 #endif
+#endif
+
+#ifdef RGB_MATRIX_ENABLE
+/// keyball_get_typing_heat_combined returns the split-combined typing-heat scalar (0-255)
+/// used by the OLED typing-heatmap animation (keymap.c). Only meaningful on the slave half
+/// (that's the only side rendering the animation); kept up to date there by the
+/// KEYBALL_TYPING_HEAT RPC handler in keyball.c.
+uint8_t keyball_get_typing_heat_combined(void);
 #endif
 
 #ifdef RGBLIGHT_ENABLE
