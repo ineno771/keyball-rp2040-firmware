@@ -350,14 +350,18 @@ void keyball_gesture_wave_task(void);
 /// 処理（kb_led_config_sync_from_rgb_matrix）が、ウェーブの一時的な色をkb_led_configへ
 /// 誤って書き込まないようにするために使う。
 bool keyball_gesture_wave_overriding(void);
+
+/// keyball_gesture_wave_drawing reports whether a gesture wave is currently being shown
+/// (either as an overlay on top of the running effect, or as a full-mode override).
+bool keyball_gesture_wave_drawing(void);
+
+/// keyball_gesture_wave_overlay draws the active gesture wave over the running RGB_MATRIX
+/// effect, touching key LEDs only (underglow untouched). Defined in rgb_matrix_user.inc;
+/// call from rgb_matrix_indicators_advanced_user.
+bool keyball_gesture_wave_overlay(uint8_t led_min, uint8_t led_max);
 #endif
 #endif
 
-#ifdef RGB_MATRIX_ENABLE
-/// keyball_get_typing_heat returns this half's typing-heat scalar (0-255) used by the
-/// OLED typing-heatmap animation (keymap.c). Local keys only.
-uint8_t keyball_get_typing_heat(void);
-#endif
 
 #ifdef RGBLIGHT_ENABLE
 /// keyball_seasonal_led_task renders the seasonal LED effects (Halloween/Easter crossfade)

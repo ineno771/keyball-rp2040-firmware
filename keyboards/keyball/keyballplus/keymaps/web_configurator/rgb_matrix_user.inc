@@ -76,8 +76,7 @@ RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 // rgb_matrix.cの時点ではまだincludeされていないため先に読み込んでおく。
 #include "report.h"
 #include "lib/keyball/keyball.h"
-// GESTURE_WAVE/TRACKBALL_BREATHがアンダーグロー用に「通常」LED設定(kb_led_config_get)を
-// 読むために必要（2026-10-02追加）。
+// keyball_gesture_wave_overlay()がKB_GESTURE_WAVE_STYLE_BREATHを参照するために必要。
 #include "lib/keyball/kb_settings.h"
 
 static bool LED_TEST(effect_params_t* params) {
@@ -593,9 +592,8 @@ static bool HEATMAP(effect_params_t* params) {
 // トリガー元(keyball.gesture_wave_*)はkeymap.cのジェスチャーエンジンが
 // keyball_gesture_wave_trigger()経由で書き込む（マスターは自分のハーフに即反映、
 // スレーブへは一方向RPCで伝えて同時に光らせる。詳細はkeyball.c参照）。
-static bool GESTURE_WAVE(effect_params_t* params) {
-    RGB_MATRIX_USE_LIMITS(led_min, led_max);
-    if (led_max <= led_min) return rgb_matrix_check_finished_leds(led_max);
+static void gesture_wave_render_sharp(uint8_t led_min, uint8_t led_max, bool overlay) {
+    if (led_max <= led_min) return;
 
     // このハーフの安定したLED範囲（実測済み。TWINKLE/RIPPLEと同じ値）。
     // RGB_MATRIX_USE_LIMITSのled_min/led_maxは1フレームの描画を約10個ずつの
@@ -640,22 +638,16 @@ static bool GESTURE_WAVE(effect_params_t* params) {
     const uint8_t WAVE_WIDTH_V = 20;  // 上下方向
     const uint8_t WAVE_WIDTH_H = 28;  // 左右方向
 
-    // アンダーグローは「通常(レイヤー0)」LED設定の色を常時表示する。rgb_matrix_config.hsv
-    // を使わない理由: 複数ジェスチャーモードはGST_HOLDキーでレイヤーを一時切替する実装
-    // のため、そのレイヤーにレイヤー連動LEDの色が設定されていると、ジェスチャーモード中は
-    // rgb_matrix_config.hsvがそのレイヤー専用の色になっている。これをそのまま使うと、
-    // ジェスチャーウェーブ発火時にアンダーグローが「本来の通常色ではない、関係のない色」
-    // に見えてしまっていた（2026-10-02、本人指摘により修正。ハロウィン等の基本LED側は
-    // 意図的に対象外＝そちらはrgb_matrix_config.hsvのままで変更しない）。
-    // kb_led_config_tをまるごとローカル変数に受けると、一部フィールド(effect_id/speed)を
-    // 使わないせいでGCCがpacked構造体の読み込みを丸ごと「未使用」と誤検知しビルドが
-    // 失敗した(-Werror=unused-but-set-variable)。フィールドだけをその場で取り出す。
-    kb_led_config_t normal_cfg = kb_led_config_get();
-    HSV             normal_hsv = {normal_cfg.hue, normal_cfg.sat, normal_cfg.val};
     for (uint8_t i = led_min; i < led_max; i++) {
         HSV out;
         if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
-            out = normal_hsv;
+            // オーバーレイ時はアンダーグローに一切触れない（下で動いている通常LED/
+            // レイヤー連動LEDのエフェクトがそのまま見える）。全体上書き時（LEDオフ
+            // 設定中のみ）は、元々消灯していたので消灯のままにする。
+            if (overlay) continue;
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;
         } else {
             out.h = 0;
             out.s = 0;
@@ -714,6 +706,11 @@ static bool GESTURE_WAVE(effect_params_t* params) {
     // ままになり、スロットが永久にactiveのまま固まって以後ウェーブが発火しなくなる
     // 不具合があった（詳細はkeyball.cのkeyball_gesture_wave_task()コメント参照）。
 
+}
+
+static bool GESTURE_WAVE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    gesture_wave_render_sharp(led_min, led_max, false);
     return rgb_matrix_check_finished_leds(led_max);
 }
 
@@ -734,9 +731,8 @@ static bool GESTURE_WAVE(effect_params_t* params) {
 // どちらを描画するかはkeyball_gesture_wave_task()がkb_gesture_wave_style_get()の
 // 設定でRGB_MATRIXモードを切り替えて選ぶため、この関数自体はGESTURE_WAVEと同じ
 // スロットを読むだけで、切り替えロジックは持たない。
-static bool TRACKBALL_BREATH(effect_params_t* params) {
-    RGB_MATRIX_USE_LIMITS(led_min, led_max);
-    if (led_max <= led_min) return rgb_matrix_check_finished_leds(led_max);
+static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool overlay) {
+    if (led_max <= led_min) return;
 
     uint8_t half_min = is_keyboard_left() ? 0 : 26;
     uint8_t half_max = is_keyboard_left() ? 26 : RGB_MATRIX_LED_COUNT;
@@ -774,16 +770,16 @@ static bool TRACKBALL_BREATH(effect_params_t* params) {
     static uint16_t off_since[RGB_MATRIX_LED_COUNT];
     static uint8_t  off_peak[RGB_MATRIX_LED_COUNT];
 
-    // アンダーグローは「通常」LED設定の色を使う。GESTURE_WAVEと同じ理由・同じ修正
-    // （2026-10-02、本人指摘。ジェスチャーモードのレイヤー切替中にrgb_matrix_config.hsv
-    // がそのレイヤー専用の色になっていることがあり、それを使うと「関係のない色」に
-    // 見えてしまっていた）。
-    kb_led_config_t normal_cfg = kb_led_config_get();
-    HSV             normal_hsv = {normal_cfg.hue, normal_cfg.sat, normal_cfg.val};
     for (uint8_t i = led_min; i < led_max; i++) {
         HSV out;
         if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
-            out = normal_hsv;
+            // オーバーレイ時はアンダーグローに一切触れない（下で動いている通常LED/
+            // レイヤー連動LEDのエフェクトがそのまま見える）。全体上書き時（LEDオフ
+            // 設定中のみ）は、元々消灯していたので消灯のままにする。
+            if (overlay) continue;
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;
         } else {
             out.h = 0;
             out.s = 0;
@@ -849,7 +845,27 @@ static bool TRACKBALL_BREATH(effect_params_t* params) {
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
 
+}
+
+static bool TRACKBALL_BREATH(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    gesture_wave_render_breath(led_min, led_max, false);
     return rgb_matrix_check_finished_leds(led_max);
+}
+// ジェスチャーウェーブを、今動いている通常LED/レイヤー連動LEDのエフェクトの「上に」
+// 重ねて描く（keymap.cのrgb_matrix_indicators_advanced_userから呼ぶ）。2026-10-02、
+// 本人指摘「ウェーブ時にアンダーグローの色が変わる」への根本対応。以前はウェーブ中だけ
+// RGB_MATRIXモード自体をGESTURE_WAVEへ切り替えていたため、アンダーグローの色をウェーブ
+// 側で何かしら決めて描く必要があり、どの色(レイヤー0の色/表示中レイヤーの色)を選んでも
+// 直前の表示と食い違う場面が残っていた。重ね描きならアンダーグローには一切触れない。
+bool keyball_gesture_wave_overlay(uint8_t led_min, uint8_t led_max) {
+    if (!keyball_gesture_wave_drawing() || keyball_gesture_wave_overriding()) return false;
+    if (keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH) {
+        gesture_wave_render_breath(led_min, led_max, true);
+    } else {
+        gesture_wave_render_sharp(led_min, led_max, true);
+    }
+    return false;
 }
 #endif // GESTURE_ENABLE
 

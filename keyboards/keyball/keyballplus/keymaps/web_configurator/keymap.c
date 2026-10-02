@@ -368,6 +368,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     return true;
 }
 
+#if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)
+// ジェスチャーウェーブを今のエフェクトの上に重ね描きする（キーのLEDのみ。アンダーグローは
+// 触らない）。詳細はrgb_matrix_user.incのkeyball_gesture_wave_overlay()参照。
+bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
+    return keyball_gesture_wave_overlay(led_min, led_max);
+}
+#endif
+
 #ifdef RGB_MATRIX_ENABLE
 // UG_TOG/UG_NEXT/UG_HUE+/UG_VAL+等（process_record_userより後、quantum本体の
 // process_underglow内でRGB_MATRIXの状態を直接書き換えた後）に呼ばれる。押した直後の
@@ -847,22 +855,7 @@ static void render_seasonal_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES
     oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
 }
 
-// タイピングヒートマップ専用: 360フレームは「90フレームずつの4段階（弱い火→中→強い→
-// 最大）」のループ構成のため、段階(tier 0-3)を選んでその範囲だけをループ再生する
-// （2026-10-02、本人希望「タイピングをしだすと炎が燃え盛り、入力が続けば続くほど
-// 激しくなる」に対応）。
-static void render_tiered_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES], uint16_t frames_per_tier, uint8_t tier) {
-    uint16_t base = (uint16_t)tier * frames_per_tier;
-    uint16_t idx  = base + (uint16_t)((timer_read() / KB_ANIM_FRAME_MS) % frames_per_tier);
-    oled_set_cursor(0, 0);
-    oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
-}
 
-// 現在の「熱量」を0-3の段階に変換する。熱量の計算はkeyball.cの
-// keyball_get_typing_heat()（このハーフ自身の打鍵のみが対象）。
-static uint8_t heatmap_tier_from_typing(void) {
-    return keyball_get_typing_heat() / 64;  // 0-255を4段階(0-3)に変換
-}
 #endif
 
 // スレーブ側（今まで静止ロゴだった側）のロゴを常時アニメーションにする
@@ -891,7 +884,7 @@ void oledkit_render_logo_user(void) {
         // 万華鏡(kaleido)はWeb UIから選べる効果の中に直接対応するものが無いため、
         // 本人指示で「リアクティブ」(REACTIVE_KEYS)に割り当てている。
         case RGB_MATRIX_CUSTOM_REACTIVE_KEYS: render_seasonal_anim_oled(anim_kaleido, KB_ANIM_KALEIDO_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_HEATMAP: render_tiered_anim_oled(anim_heatmap, KB_ANIM_HEATMAP_FRAMES / 4, heatmap_tier_from_typing()); handled = true; break;
+        case RGB_MATRIX_CUSTOM_HEATMAP: render_seasonal_anim_oled(anim_heatmap, KB_ANIM_HEATMAP_FRAMES); handled = true; break;
         case RGB_MATRIX_CUSTOM_RIPPLE: render_seasonal_anim_oled(anim_ripple, KB_ANIM_RIPPLE_FRAMES); handled = true; break;
         default: break;
     }

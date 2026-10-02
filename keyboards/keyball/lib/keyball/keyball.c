@@ -739,42 +739,6 @@ static void rpc_gesture_wave_invoke(void) {
 }
 #endif
 
-#ifdef RGB_MATRIX_ENABLE
-// 自分のハーフの「打鍵の熱量」(0-255)を計算・更新して返す。keymap.cの
-// heatmap_tier_from_typing()が以前ローカルに持っていた実装をそのまま移設したもの
-// （2026-10-02移設）。g_last_hit_tracker
-// （両ハーフでそれぞれローカルに更新されるQMK本体のグローバル変数）が入力元のため、
-// この関数自体もマスター・スレーブそれぞれで独立した静的状態を持って呼ばれる想定
-// （LED側のper-key HEATMAP()エフェクトとは別の、単一スカラー値の蓄熱・減衰ロジック）。
-static uint8_t keyball_typing_heat_local(void) {
-    static uint8_t  heat            = 0;
-    static uint16_t heat_last_tick  = 0xFFFF;  // g_last_hit_tracker.tickの初期値0と衝突しないよう大きい値で初期化
-    static uint16_t heat_decay_tick = 0;
-
-    uint8_t cnt = g_last_hit_tracker.count;
-    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
-    for (uint8_t j = 0; j < cnt; j++) {
-        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
-        if (g_last_hit_tracker.tick[j] < heat_last_tick) {
-            uint16_t next = (uint16_t)heat + 24;
-            heat          = (next > 255) ? 255 : (uint8_t)next;
-        }
-        heat_last_tick = g_last_hit_tracker.tick[j];
-    }
-    if (timer_elapsed(heat_decay_tick) >= 120) {
-        heat_decay_tick = timer_read();
-        if (heat > 0) heat--;
-    }
-    return heat;
-}
-
-// 2026-10-02: 両ハーフ合算のため専用RPC(KEYBALL_TYPING_HEAT)を一度追加したが、
-// 導入直後にトラックボールが反応しなくなる不具合が出たため取り消した。現在は
-// このハーフ自身の打鍵だけを見る（v0.4.1と同じ挙動）。
-uint8_t keyball_get_typing_heat(void) {
-    return keyball_typing_heat_local();
-}
-#endif
 
 #endif
 
@@ -1069,7 +1033,8 @@ void keyball_apply_layer_led(uint8_t hl) {
 // いても関係なく、ジェスチャー発火の瞬間だけ最優先でウェーブを表示するための仕組み
 // （詳細はkeyball.hのコメント参照）。housekeeping_task_kbから両ハーフで毎スキャン
 // 呼ばれる。
-static bool g_gesture_wave_overriding = false;
+static bool g_gesture_wave_overriding = false;  // LEDオフ時の全体上書き中のみtrue
+static bool g_gesture_wave_drawing    = false;  // ウェーブ表示中（重ね描き・全体上書きどちらでも）
 
 // ウェーブ1回分の表示時間。スタイル（シャープ/ブリージング）ごとに描画関数
 // (rgb_matrix_user.incのGESTURE_WAVE/TRACKBALL_BREATH)が使っている式と必ず
@@ -1117,18 +1082,32 @@ void keyball_gesture_wave_task(void) {
         }
     }
 
-    if (active && !g_gesture_wave_overriding) {
-        g_gesture_wave_overriding = true;
-        rgb_matrix_enable_noeeprom();  // 通常LEDがオフ設定でもウェーブだけは見えるようにする
-        rgb_matrix_mode_noeeprom(keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH ? RGB_MATRIX_CUSTOM_TRACKBALL_BREATH : RGB_MATRIX_CUSTOM_GESTURE_WAVE);
-    } else if (!active && g_gesture_wave_overriding) {
-        g_gesture_wave_overriding = false;
-        apply_layer_led_now(get_highest_layer(layer_state));
+    // 2026-10-02〜: 通常はRGB_MATRIXモードを切り替えず、今のエフェクトの上に重ね描き
+    // する（rgb_matrix_user.incのkeyball_gesture_wave_overlay()）。アンダーグローを
+    // 一切変えないため。LED自体がオフ設定の時だけは重ね描きの土台が無いので、従来通り
+    // モードごとウェーブへ切り替える（その場合アンダーグローは消灯のまま描かれる）。
+    if (active && !g_gesture_wave_drawing) {
+        g_gesture_wave_drawing = true;
+        if (!rgb_matrix_is_enabled()) {
+            g_gesture_wave_overriding = true;
+            rgb_matrix_enable_noeeprom();
+            rgb_matrix_mode_noeeprom(keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH ? RGB_MATRIX_CUSTOM_TRACKBALL_BREATH : RGB_MATRIX_CUSTOM_GESTURE_WAVE);
+        }
+    } else if (!active && g_gesture_wave_drawing) {
+        g_gesture_wave_drawing = false;
+        if (g_gesture_wave_overriding) {
+            g_gesture_wave_overriding = false;
+            apply_layer_led_now(get_highest_layer(layer_state));
+        }
     }
 }
 
 bool keyball_gesture_wave_overriding(void) {
     return g_gesture_wave_overriding;
+}
+
+bool keyball_gesture_wave_drawing(void) {
+    return g_gesture_wave_drawing;
 }
 #endif
 
