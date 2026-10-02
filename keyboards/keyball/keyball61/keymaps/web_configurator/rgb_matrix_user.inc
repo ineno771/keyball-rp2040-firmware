@@ -1,0 +1,870 @@
+// LED_TEST: 指定インデックスのLEDのみ点灯（LED診断用）
+// hue フィールドにLEDインデックスを格納。rgb_matrix_config は左右同期済みなので両側で動作する
+RGB_MATRIX_EFFECT(LED_TEST)
+
+// REACTIVE_KEYS: 押したキーのLEDだけが光る（隣接LEDへの波及なし）。
+// アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける。
+// g_last_hit_tracker（両ハーフでそれぞれローカルに更新される）を使うため左右両側で
+// 独立して動作する。旧SOLID_RIPPLE（波紋演出）から仕様変更（2026-09-04）。
+// LEDごとに直接フェード状態を持つ設計にしたことで、旧実装にあった以下の問題も
+// 併せて解消している：8個までしか同時に覚えられない・バッファシフトで誤検出する、
+// といった制約や不具合が構造的に起きなくなった（LEDの数だけ独立した状態を持つため）。
+RGB_MATRIX_EFFECT(REACTIVE_KEYS)
+
+// 以下4つはRGBLIGHT版に存在したがRGB_MATRIXに組み込みが無いエフェクトの再現。
+// いずれも片側ハーフのLED範囲(led_min〜led_max)だけを使ってローカルに完結させて
+// いるため、RGBLIGHT版で問題になっていたスプリット両ハーフ間の同期は考慮不要。
+RGB_MATRIX_EFFECT(SNAKE)
+RGB_MATRIX_EFFECT(KNIGHT)
+RGB_MATRIX_EFFECT(CHRISTMAS)
+RGB_MATRIX_EFFECT(ALTERNATING)
+
+// ハロウィン・イースター（季節限定）。RGBLIGHT版は単色クロスフェードだったが、
+// 本人希望によりクリスマスと同じ「市松模様に交互点灯」する動きに揃えている。
+RGB_MATRIX_EFFECT(HALLOWEEN)
+RGB_MATRIX_EFFECT(EASTER)
+
+// TWINKLE: 基本は設定色で常時点灯し、ランダムなLEDが時々明るく煌めいてから元に戻る
+// （星の瞬きのような演出）。組み込みのRAINDROPS/STARLIGHTは常に色相・明るさが
+// 揺れ動いてしまい「基本は常時点灯」という要望に合わなかったため自作した。
+RGB_MATRIX_EFFECT(TWINKLE)
+
+// TRACKBALL: トラックボールを転がした向き・速さに応じて全LEDが一瞬色相を変えつつ
+// 明るく光り、動きが止まると元の設定色にフェードして戻る。Keyballならではの演出。
+RGB_MATRIX_EFFECT(TRACKBALL)
+
+// RIPPLE: 押したキーの物理座標(g_led_config.point)を中心に波紋がリング状に広がる。
+// アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
+// （本人希望。REACTIVE_KEYSと同じ扱い）。
+RGB_MATRIX_EFFECT(RIPPLE)
+
+// HEATMAP: 押したキーだけをLEDインデックス単位で蓄熱・減衰させる自作タイピング
+// ヒートマップ。QMK組み込みのTYPING_HEATMAPは
+// (1) 隣接キーにも熱が伝播するため押していないキーまで反応する
+// (2) 色相を熱量から内部計算する固定仕様で、ユーザーの色相設定を無視する
+// という2点が要望に合わなかったため、g_last_hit_trackerとLEDごとの蓄熱テーブルに
+// よる自作実装に置き換えている（色相・彩度はrgb_matrix_config.hsvをそのまま使う）。
+RGB_MATRIX_EFFECT(HEATMAP)
+
+#ifdef GESTURE_ENABLE
+// GESTURE_WAVE: トラックボール専用。複数ジェスチャーモードで実際にキーが送出された
+// 瞬間（keyball.hのkeyball_gesture_wave_trigger経由）にだけ、その方向に応じて
+// LEDが列(左右振り)/行(上下振り)単位で帯状に流れる。押している間ずっとではなく
+// 発火の都度1回（連続入力ONの方向なら連続して）発動する、Keyballならではの演出。
+// 他の自作エフェクトと違い、Web UIのLED_EFFECTS一覧には出さない（ユーザーが選択する
+// ものではなく、keyball_gesture_wave_task()がジェスチャー発火中だけ現在のモードを
+// 強制的にこれへ切り替え、終わったら元に戻す「常時有効なオーバーレイ」のため）。
+RGB_MATRIX_EFFECT(GESTURE_WAVE)
+
+// TRACKBALL_BREATH: GESTURE_WAVEと同じ発火の仕組み（トリガー元・6スロットの管理は
+// 完全に共通）を使う、見た目だけ異なる「もう一つのスタイル」。GESTURE_WAVEがシャープに
+// 一瞬光って消えるのに対し、こちらは輪郭が柔らかく、呼吸するように流れる
+// （本人希望「トラックボールを動かした方向にふわっとブリージングのようなウェーブが
+// 出るエフェクト」をジェスチャー専用にしたもの、2026-09-29）。どちらを使うかは
+// kb_gesture_wave_style_get()の設定でkeyball_gesture_wave_task()が切り替えるため、
+// GESTURE_WAVEと同じくWeb UIのLED_EFFECTS一覧には出さない。
+RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
+#endif
+
+#ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
+
+// TRACKBALL専用: keyball.this_motion/that_motion（トラックボールの移動量）を
+// 読むために必要。書き込みは一切行わない（ポインタ移動処理には影響しない）。
+// keyball39.c等と同じく、keyboards/keyball/を基準にした相対パスで指定する
+// （rgb_matrix_user.incはquantum/rgb_matrix/rgb_matrix.cから#includeされるため）。
+// keyball.hはreport_mouse_t（tmk_core/protocol/report.h）に依存しているが、
+// rgb_matrix.cの時点ではまだincludeされていないため先に読み込んでおく。
+#include "report.h"
+#include "lib/keyball/keyball.h"
+// keyball_gesture_wave_overlay()がKB_GESTURE_WAVE_STYLE_BREATHを参照するために必要。
+#include "lib/keyball/kb_settings.h"
+
+static bool LED_TEST(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    uint8_t idx = rgb_matrix_config.hsv.h;  // hue = テスト対象LEDインデックス（両側で同期済み）
+    for (uint8_t i = led_min; i < led_max; i++) {
+        if (i == idx) {
+            rgb_matrix_set_color(i, 255, 100, 0);
+        } else {
+            rgb_matrix_set_color(i, 0, 0, 0);
+        }
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+static bool REACTIVE_KEYS(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // LEDインデックスごとに直近のヒット時刻を保持する（波紋と違い近隣への伝播が
+    // ないので、LEDの数だけ独立したスロットを持てば十分。取りこぼしや誤検出の
+    // 心配がない）。
+    static uint16_t hit_start[RGB_MATRIX_LED_COUNT];
+    static bool     hit_active[RGB_MATRIX_LED_COUNT];
+
+    // 新規ヒットを反映
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
+        uint8_t idx = g_last_hit_tracker.index[j];
+        if (idx < RGB_MATRIX_LED_COUNT) {
+            hit_start[idx]  = timer_read();
+            hit_active[idx] = true;
+        }
+    }
+
+    const uint16_t FADE_MS = 250;  // 押してから消えるまでのフェード時間
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV hsv = rgb_matrix_config.hsv;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時点灯（設定色そのまま）。
+        } else {
+            // キー連動LED: 押されていなければ消灯、押された直後はフェードアウト。
+            // ピーク輝度は固定255ではなく設定値(hsv.v)にする（2026-09-11修正:
+            // 固定255のままだと「Val」を下げてもここだけ常に最大輝度になり、
+            // 「Valがアンダーグローにしか効かない」不具合になっていた）。
+            uint8_t peak = hsv.v;
+            hsv.v        = 0;
+            if (hit_active[i]) {
+                uint16_t elapsed = timer_elapsed(hit_start[i]);
+                if (elapsed >= FADE_MS) {
+                    hit_active[i] = false;
+                } else {
+                    hsv.v = peak - (uint8_t)(((uint32_t)elapsed * peak) / FADE_MS);
+                }
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(hsv);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// SNAKE: 明るい先頭(head)がLED配列上を巡回し、後ろに向かって徐々に暗くなる
+// 尻尾を引く（RGBLIGHT_MODE_SNAKEの再現）。片側ハーフのLED範囲内で完結する。
+static bool SNAKE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    uint8_t count = led_max - led_min;
+    if (count == 0) return rgb_matrix_check_finished_leds(led_max);
+
+    // speedが大きいほど短い間隔でheadが1つ進む（50〜400ms）
+    uint16_t interval = 400 - ((uint16_t)rgb_matrix_config.speed * 350 / 255);
+    static uint16_t last_tick = 0;
+    static uint8_t  head      = 0;
+    if (timer_elapsed(last_tick) >= interval) {
+        last_tick = timer_read();
+        head      = (head + 1) % count;
+    }
+
+    // 尻尾のフェードは付けず、配線順(インデックス)で1個のLEDだけが点灯して進む
+    // （複数箇所が同時に光ってバラバラに見えるという指摘を受けて変更）。
+    HSV hsv = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        uint8_t pos = i - led_min;
+        HSV     out = hsv;
+        if (pos != head) out.v = 0;
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// KNIGHT: 明るい点がLED配列の両端で折り返しながら往復する（ナイトライダー/Cylon
+// スキャナー、RGBLIGHT_MODE_KNIGHTの再現）。
+static bool KNIGHT(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    uint8_t count = led_max - led_min;
+    if (count == 0) return rgb_matrix_check_finished_leds(led_max);
+
+    uint16_t interval = 300 - ((uint16_t)rgb_matrix_config.speed * 250 / 255);  // 50〜300ms
+    static uint16_t last_tick = 0;
+    static int8_t   pos       = 0;
+    static int8_t   dir       = 1;
+    if (timer_elapsed(last_tick) >= interval) {
+        last_tick = timer_read();
+        pos += dir;
+        if (pos >= (int8_t)count - 1) { pos = count - 1; dir = -1; }
+        if (pos <= 0) { pos = 0; dir = 1; }
+    }
+
+    const uint8_t TAIL_LEN = 4;
+    HSV           hsv      = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        int16_t dist = pos - (int16_t)(i - led_min);
+        if (dist < 0) dist = -dist;
+        HSV out = hsv;
+        out.v   = (dist < TAIL_LEN) ? (uint8_t)((uint16_t)hsv.v * (TAIL_LEN - dist) / TAIL_LEN) : 0;
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// CHRISTMAS: 赤と緑を交互に配置し、一定間隔で入れ替える（RGBLIGHT_MODE_CHRISTMASの再現）。
+// 複数色を市松模様に配置し、一定間隔でずらしていく（CHRISTMAS・HALLOWEEN・EASTERの
+// 共通実装）。色数2なら「0→1→0→1…」と交互点灯、3なら3色が順にずれていく。
+static void render_checkerboard(effect_params_t* params, const uint8_t* hues, uint8_t count, uint16_t* last_tick, uint8_t* phase) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    uint16_t interval = 1500 - ((uint16_t)rgb_matrix_config.speed * 1400 / 255);  // 100〜1500ms
+    if (timer_elapsed(*last_tick) >= interval) {
+        *last_tick = timer_read();
+        *phase     = (uint8_t)((*phase + 1) % count);
+    }
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローはテーマの色(hues[0])を固定で使う。彩度・明るさは本体の
+            // キー側と同じく設定値に従う（2026-10-02再修正: 一度は色相も含めてbaseを
+            // そのまま使う実装にしていたが、キー側の市松模様は色相スライダーを無視して
+            // テーマ固有の色相で固定しているのに、アンダーグローだけスライダーに
+            // 追従すると配色の統一感が崩れ、本人の意図「テーマ固有の色に固定したい」
+            // に反していた。2026-10-01の修正の目的＝「市松模様の移り変わる色が
+            // アンダーグローにまで侵食しないこと」は、hues[0]固定でも変わらず満たす）。
+            out = (HSV){hues[0], base.s, base.v};
+        } else {
+            uint8_t slot = (uint8_t)(((i - led_min) + *phase) % count);
+            out          = (HSV){hues[slot], base.s, base.v};
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+}
+
+static bool CHRISTMAS(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {0, 85};  // 赤・緑
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 2, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// HALLOWEEN: オレンジ×紫の市松模様（色相はkeyball.cのRGBLIGHT版seasonal_palette_forと
+// 揃えてある）。
+static bool HALLOWEEN(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {21, 191};  // オレンジ・紫
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 2, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// EASTER: パステルピンク・グリーン・イエローの3色が順にずれていく市松模様。
+static bool EASTER(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static const uint8_t hues[] = {228, 90, 42};  // パステルピンク・グリーン・イエロー
+    static uint16_t      last_tick = 0;
+    static uint8_t       phase     = 0;
+    render_checkerboard(params, hues, 3, &last_tick, &phase);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+static bool TWINKLE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // LEDごとに「今瞬いている最中か」「いつ始まったか」を持つ（REACTIVE_KEYSと同じ
+    // 発想で、LEDの数だけ独立したスロットを持つため取りこぼしや誤検出の心配がない）。
+    static uint16_t twinkle_start[RGB_MATRIX_LED_COUNT];
+    static bool     twinkle_active[RGB_MATRIX_LED_COUNT];
+    static uint16_t spawn_last_tick = 0;
+
+    // RGB_MATRIX_USE_LIMITSは1フレームの描画を約10個ずつの小さな区間(chunk)に分けて
+    // 複数回(iter)呼び出す仕組み。無し側では一時的にled_min > led_max（範囲が空・反転）
+    // になる区間があり、単純なfor文（i=led_min; i<led_max; i++）なら自動的に何もせず
+    // 安全だが、以下は配列の添字をled_min基準で直接計算するため、その保護が無いと
+    // count(uint8_t)がアンダーフローして巨大な値になり、配列範囲外に書き込んでしまって
+    // いた（実機でランダムなキーが反応しなくなる不具合として発現）。
+    //
+    // さらに、発生位置の抽選は「そのiterのchunk内」ではなくハーフ全体から行う必要がある
+    // （chunk単位で抽選すると、判定が真っ先に成立する先頭chunk付近ばかりに偏って発生
+    // していた）。ハーフ全体の範囲はconfig.hのRGB_MATRIX_SPLIT { 34, 37 }と対応
+    // （「ボール搭載側=is_keyboard_left()=true」として扱う。keymap.cのis_keyboard_left()参照）。
+    uint8_t half_min   = is_keyboard_left() ? 0 : 34;
+    uint8_t half_max   = is_keyboard_left() ? 34 : RGB_MATRIX_LED_COUNT;
+    uint8_t half_count = half_max - half_min;
+
+    if (led_max > led_min) {
+        // 瞬きの発生頻度: speedが大きいほど短い間隔で新しい瞬きが生まれる
+        // 最速でもそこまで慌ただしくならないよう、全体的に遅めのレンジにしてある
+        uint16_t spawn_interval = 3000 - ((uint16_t)rgb_matrix_config.speed * 2200 / 255);  // 800〜3000ms
+        if (timer_elapsed(spawn_last_tick) >= spawn_interval) {
+            spawn_last_tick     = timer_read();
+            uint8_t idx         = half_min + random8_max(half_count);
+            twinkle_start[idx]  = timer_read();
+            twinkle_active[idx] = true;
+        }
+    }
+
+    const uint16_t TWINKLE_MS = 1500;  // 瞬き1回分の長さ（明るくなって元に戻るまで）
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV hsv = rgb_matrix_config.hsv;  // 基本は常時点灯（設定色そのまま）
+        if (twinkle_active[i]) {
+            uint16_t elapsed = timer_elapsed(twinkle_start[i]);
+            if (elapsed >= TWINKLE_MS) {
+                twinkle_active[i] = false;
+            } else {
+                // 0→山→0で明るさを一瞬持ち上げつつ彩度を落とし、白っぽく煌めかせる
+                uint8_t  t     = (uint8_t)(((uint32_t)elapsed * 255) / TWINKLE_MS);
+                uint8_t  boost = t < 128 ? (uint8_t)(t * 2) : (uint8_t)((255 - t) * 2);
+                hsv.s          = (uint8_t)((uint16_t)hsv.s * (255 - boost) / 255);
+                uint16_t v     = (uint16_t)hsv.v + ((uint16_t)(255 - hsv.v) * boost / 255);
+                hsv.v          = v > 255 ? 255 : (uint8_t)v;
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(hsv);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// TRACKBALL: keyball.this_motion/that_motion（トラックボールの移動量、split越しに
+// 同期済み）を読み、動いていれば向きに応じた色相へ一瞬変えつつ明るさを上げ、止まると
+// 元の設定色にフェードして戻る。read-onlyで値を変更しないため、ポインタ移動処理
+// （keyball.c側でこれらの値を蓄積・消費している）には一切影響しない。
+static bool TRACKBALL(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // 自分のハーフにボールが無ければ相方ハーフの動きを見る（ボールがどちらの手でも
+    // 同じように反応させるため）。
+    int16_t dx = keyball.this_have_ball ? keyball.this_motion.x : keyball.that_motion.x;
+    int16_t dy = keyball.this_have_ball ? keyball.this_motion.y : keyball.that_motion.y;
+    uint8_t adx = (uint8_t)(dx < 0 ? -dx : dx);
+    uint8_t ady = (uint8_t)(dy < 0 ? -dy : dy);
+
+    static uint16_t last_move_tick = 0;
+    static uint8_t  hold_hue       = 0;
+    static uint8_t  hold_speed     = 0;
+
+    if (adx > 0 || ady > 0) {
+        last_move_tick = timer_read();
+
+        // 向きを8方向に量子化して色相を割り当てる（atan2を使わない簡易版）。
+        // 右=赤(0) 左=シアン(128) 下=青(192) 上=黄緑(64)、斜めはその中間。
+        uint8_t hue;
+        if (adx > (uint8_t)(ady * 2)) {
+            hue = dx > 0 ? 0 : 128;
+        } else if (ady > (uint8_t)(adx * 2)) {
+            hue = dy > 0 ? 192 : 64;
+        } else if (dx > 0) {
+            hue = dy > 0 ? 224 : 32;
+        } else {
+            hue = dy > 0 ? 160 : 96;
+        }
+        hold_hue = hue;
+
+        uint16_t mag = (uint16_t)adx + (uint16_t)ady;
+        hold_speed   = mag > 255 ? 255 : (uint8_t)mag;
+    }
+
+    // 動きが止まってから元の色に戻るまでの時間。speedが大きいほど短く（キビキビ）なる
+    // （本人希望により、消えるのが早すぎたため大幅に延長: 200〜900ms → 500〜3000ms）
+    const uint16_t DECAY_MS = 3000 - ((uint16_t)rgb_matrix_config.speed * 2500 / 255);  // 500〜3000ms
+    uint16_t       elapsed  = timer_elapsed(last_move_tick);
+    uint8_t        glow     = (elapsed >= DECAY_MS) ? 0 : (uint8_t)((uint32_t)hold_speed * (DECAY_MS - elapsed) / DECAY_MS);
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (glow > 0) {
+            out.h          = hold_hue;
+            uint16_t val_v = (uint16_t)base.v + glow;
+            out.v          = val_v > 255 ? 255 : (uint8_t)val_v;
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// RIPPLE: 押したキーの物理座標(g_led_config.point)を中心に、リング状の波紋が
+// 広がっていく。複数の波紋を同時に扱えるよう、g_last_hit_trackerとは別に専用の
+// スロット配列を持つ（固定8スロットのリングバッファだった旧SOLID_RIPPLEで
+// 「取りこぼす・波紋が途中で終わる」不具合があったため、空きスロット優先・
+// 無ければ最古を上書きする方式にしている）。
+#define RIPPLE_SLOT_COUNT 6
+static bool RIPPLE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    static uint16_t ripple_start[RIPPLE_SLOT_COUNT];
+    static uint8_t  ripple_x[RIPPLE_SLOT_COUNT];
+    static uint8_t  ripple_y[RIPPLE_SLOT_COUNT];
+    static bool     ripple_active[RIPPLE_SLOT_COUNT];
+
+    // 波紋が広がりきるまでの時間。speedが大きいほど短く（速く）なる
+    const uint16_t RIPPLE_MS    = 1200 - ((uint16_t)rgb_matrix_config.speed * 1000 / 255);  // 200〜1200ms
+    const uint8_t  RIPPLE_MAX_R = 100;  // 広がる最大半径（座標系はx:0-224,y:0-64程度）
+    const uint8_t  RIPPLE_WIDTH = 30;   // リングの太さ
+
+    // マトリクス状態は両ハーフ間で同期されているため、g_last_hit_trackerには
+    // 反対側ハーフのキーのヒットも記録される。座標ベースのRIPPLEはこれを素通しすると
+    // 波紋の中心座標が反対側ハーフの物理位置になり、中央付近のキー（col4等）を押した際に
+    // 反対側ハーフのLEDまで反応してしまう（TWINKLE修正時と同じ理由でper-iterの
+    // led_min/led_maxではなくハーフ全体の安定した範囲で判定する必要がある）。
+    uint8_t half_min = is_keyboard_left() ? 0 : 34;
+    uint8_t half_max = is_keyboard_left() ? 34 : RGB_MATRIX_LED_COUNT;
+
+    // 新規ヒットを取り込む。g_last_hit_trackerはREACTIVE_KEYSと同じく「十分新しい
+    // ものだけ」判定で、長時間使用時にtickが古い情報を誤って取り込むのを防ぐ。
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;
+        uint8_t idx = g_last_hit_tracker.index[j];
+        if (idx >= RGB_MATRIX_LED_COUNT) continue;
+        if (idx < half_min || idx >= half_max) continue;  // 反対側ハーフのキーは無視
+        if (g_led_config.flags[idx] & LED_FLAG_UNDERGLOW) continue;  // アンダーグローは起点にしない
+
+        uint8_t slot = RIPPLE_SLOT_COUNT;
+        for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+            if (!ripple_active[s]) { slot = s; break; }
+        }
+        if (slot == RIPPLE_SLOT_COUNT) {
+            // 空きが無ければ最も経過時間が長いスロットを上書きする
+            uint16_t oldest = 0;
+            for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+                uint16_t e = timer_elapsed(ripple_start[s]);
+                if (e >= oldest) { oldest = e; slot = s; }
+            }
+        }
+        ripple_start[slot]  = timer_read();
+        ripple_x[slot]      = g_led_config.point[idx].x;
+        ripple_y[slot]      = g_led_config.point[idx].y;
+        ripple_active[slot] = true;
+    }
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // アンダーグローは常時点灯（設定色そのまま）
+        } else {
+            out.v = 0;
+            for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+                if (!ripple_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(ripple_start[s]);
+                if (elapsed >= RIPPLE_MS) continue;
+
+                uint16_t radius = (uint16_t)((uint32_t)elapsed * RIPPLE_MAX_R / RIPPLE_MS);
+                int16_t  dx     = (int16_t)g_led_config.point[i].x - (int16_t)ripple_x[s];
+                int16_t  dy     = (int16_t)g_led_config.point[i].y - (int16_t)ripple_y[s];
+                uint8_t  dist   = sqrt16((uint32_t)dx * dx + (uint32_t)dy * dy);
+                uint16_t ring_d = (dist > radius) ? (dist - radius) : (radius - dist);
+
+                if (ring_d < RIPPLE_WIDTH) {
+                    uint8_t fade        = (uint8_t)(255 - ((uint32_t)elapsed * 255 / RIPPLE_MS));
+                    uint8_t ring_bright = (uint8_t)(255 - ((uint32_t)ring_d * 255 / RIPPLE_WIDTH));
+                    // ピーク輝度が固定255にならないよう、設定値(base.v)を上限にスケールする
+                    // （2026-09-11修正: REACTIVE_KEYSと同じ「Valがアンダーグローにしか
+                    // 効かない」不具合がRIPPLEにもあった）。
+                    uint8_t v = (uint8_t)(((uint32_t)fade * ring_bright / 255) * base.v / 255);
+                    if (v > out.v) out.v = v;  // 波紋同士が重なる場合は明るい方を採用
+                }
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+
+    for (uint8_t s = 0; s < RIPPLE_SLOT_COUNT; s++) {
+        if (ripple_active[s] && timer_elapsed(ripple_start[s]) >= RIPPLE_MS) {
+            ripple_active[s] = false;
+        }
+    }
+
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// ALTERNATING: LED範囲を前半・後半の2グループに分け、明暗を一定間隔で入れ替える
+// （RGBLIGHT_MODE_ALTERNATINGの再現）。片側ハーフ内で完結させるため、RGBLIGHT版で
+// 課題になっていたスプリット両ハーフ間の同期方式は考慮不要。
+static bool ALTERNATING(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    uint8_t count = led_max - led_min;
+    if (count == 0) return rgb_matrix_check_finished_leds(led_max);
+
+    uint16_t interval = 1500 - ((uint16_t)rgb_matrix_config.speed * 1400 / 255);
+    static uint16_t last_tick = 0;
+    static bool     phase     = false;
+    if (timer_elapsed(last_tick) >= interval) {
+        last_tick = timer_read();
+        phase     = !phase;
+    }
+
+    uint8_t half = count / 2;
+    HSV     hsv  = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        bool first_group = (i - led_min) < half;
+        HSV  out         = hsv;
+        out.v            = (first_group == phase) ? hsv.v : 0;
+        RGB rgb          = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// HEATMAP: 押したキーのLEDだけに熱量(0-255)を持たせ、押すたびに加算・時間経過で
+// 減衰させる。明るさ(v)は熱量に関わらず設定値のまま保持し、代わりに色相を熱量に
+// 応じて寒色(青)→暖色(赤)へ変化させる（本人希望。何度も押すほど色が変わって
+// いく見た目にするため）。彩度はrgb_matrix_config.hsvの設定をそのまま使う。
+// アンダーグロー(LED_FLAG_UNDERGLOW)は常時、設定色でそのまま点灯し続ける
+// （RIPPLE・REACTIVE_KEYSと同じ扱い）。
+// 【2026-09-18】「どれだけのタイピングで赤くなるかの早さを調整したい」との要望で、
+// 1打鍵あたりの熱量増加を固定値(32)から、標準の「速度」スライダー(rgb_matrix_config.speed
+// 0-255)で可変にした。左に振るほど何度も打たないと赤くならず(MIN)、右に振るほど
+// 少ない打鍵ですぐ赤くなる(MAX)。他の一部エフェクト(REACTIVE_KEYS等)と違いHEATMAPは
+// 元々「速度」概念を使っていなかったため、Web UI側でも該当エフェクトIDをスライダー
+// 非表示リスト(LED_NO_SPEED_EFFECT_IDS)から外す対応を合わせて行っている。
+#define HEATMAP_INCREASE_MIN 4    // 速度スライダー最小(0)での1打鍵あたりの熱量増加
+#define HEATMAP_INCREASE_MAX 128  // 速度スライダー最大(255)での1打鍵あたりの熱量増加
+// 【2026-09-18】「もっと長く保持してほしい」との指摘で25→100msに変更（約4倍）。
+// 1打鍵分(熱量32)が冷めきるまでの時間は 32*25ms=800ms → 32*100ms=3.2秒、
+// フル加熱(255)からは 255*25ms≒6.4秒 → 255*100ms≒25.5秒になる。
+#define HEATMAP_DECAY_INTERVAL_MS 100  // この間隔ごとに熱量を1ずつ下げる
+static bool HEATMAP(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    static uint8_t  heat[RGB_MATRIX_LED_COUNT];
+    static uint16_t heat_last_tick[RGB_MATRIX_LED_COUNT];
+    static bool     heat_init = false;
+    if (!heat_init) {
+        // g_last_hit_tracker.tickの初期値0と衝突しないよう、大きな値で初期化しておく
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) heat_last_tick[i] = 0xFFFF;
+        heat_init = true;
+    }
+
+    uint8_t increase_step = HEATMAP_INCREASE_MIN + (uint8_t)(((uint16_t)rgb_matrix_config.speed * (HEATMAP_INCREASE_MAX - HEATMAP_INCREASE_MIN)) / 255);
+
+    // 新規ヒットのみ蓄熱する。g_last_hit_trackerは同じ押下がtick<=30の間、複数フレーム
+    // に渡って観測され続けるため、「前回見た時よりtickが小さくなった＝新しい押下」の
+    // 場合だけ加算することで二重加算を防いでいる（RIPPLE等と違い、蓄積値を扱うため
+    // 二重加算すると熱量が実際の打鍵より早く上がってしまう）。
+    uint8_t cnt = g_last_hit_tracker.count;
+    if (cnt > LED_HITS_TO_REMEMBER) cnt = LED_HITS_TO_REMEMBER;
+    for (uint8_t j = 0; j < cnt; j++) {
+        if (g_last_hit_tracker.tick[j] > 30) continue;  // 十分新しいヒットのみ対象
+        uint8_t idx = g_last_hit_tracker.index[j];
+        if (idx >= RGB_MATRIX_LED_COUNT) continue;
+        if (g_last_hit_tracker.tick[j] < heat_last_tick[idx]) {
+            heat[idx] = qadd8(heat[idx], increase_step);
+        }
+        heat_last_tick[idx] = g_last_hit_tracker.tick[j];
+    }
+
+    // 熱量の減衰タイミング判定はフレーム全体で1回だけ行う
+    // （TYPING_HEATMAP同様、複数iterに分かれてもタイマーは1回しか進めない）
+    static uint16_t decay_last_tick = 0;
+    static bool     do_decay        = false;
+    if (params->iter == 0) {
+        do_decay = timer_elapsed(decay_last_tick) >= HEATMAP_DECAY_INTERVAL_MS;
+        if (do_decay) decay_last_tick = timer_read();
+    }
+
+    HSV base = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out = base;
+        if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
+            if (heat[i] == 0) {
+                out.v = 0;  // 一度も押されていない（または冷めきった）キーは消灯
+            } else {
+                // 熱量0〜255を色相170(青=寒色)〜0(赤=暖色)にマッピングする。
+                // 明るさは熱量に関係なく設定値のまま（本人希望）。
+                out.h = (uint8_t)(170 - ((uint16_t)heat[i] * 170 / 255));
+                out.v = base.v;
+            }
+            if (do_decay && heat[i] > 0) heat[i]--;
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+#ifdef GESTURE_ENABLE
+// GESTURE_WAVE: RIPPLEと同じ固定スロット方式だが、「中心からの半径」ではなく
+// 「x座標(左右振り時)またはy座標(上下振り時)に沿った直線の帯」が進む点が異なる。
+// トリガー元(keyball.gesture_wave_*)はkeymap.cのジェスチャーエンジンが
+// keyball_gesture_wave_trigger()経由で書き込む（マスターは自分のハーフに即反映、
+// スレーブへは一方向RPCで伝えて同時に光らせる。詳細はkeyball.c参照）。
+static void gesture_wave_render_sharp(uint8_t led_min, uint8_t led_max, bool overlay) {
+    if (led_max <= led_min) return;
+
+    // このハーフの安定したLED範囲（実測済み。TWINKLE/RIPPLEと同じ値）。
+    // RGB_MATRIX_USE_LIMITSのled_min/led_maxは1フレームの描画を約10個ずつの
+    // 小さなchunkに分けて複数回呼び出す仕組みで、chunkごとに範囲が変わる
+    // （TWINKLE修正時に判明した罠）。以前はこのchunk単位のled_min/led_maxで
+    // x/y座標の最小・最大をキャッシュしてしまっており、「たまたま最初に呼ばれた
+    // chunk」に含まれる一部のLEDだけを基準にした狭い範囲に固定されてしまっていた。
+    // これがウェーブの発光順が乱れる（無し側の左右）・向きが反転して見える
+    // （ボール側の左右）原因だった（2026-09-09発覚）。
+    uint8_t half_min = is_keyboard_left() ? 0 : 34;
+    uint8_t half_max = is_keyboard_left() ? 34 : RGB_MATRIX_LED_COUNT;
+
+    // このハーフのLED物理座標の範囲は起動後変わらないため一度だけ計測してキャッシュする。
+    static bool    bounds_ready = false;
+    static uint8_t x_min, x_max, y_min, y_max;
+    if (!bounds_ready) {
+        x_min = y_min = 255;
+        x_max = y_max = 0;
+        for (uint8_t i = half_min; i < half_max; i++) {
+            uint8_t x = g_led_config.point[i].x;
+            uint8_t y = g_led_config.point[i].y;
+            if (x < x_min) x_min = x;
+            if (x > x_max) x_max = x;
+            if (y < y_min) y_min = y;
+            if (y > y_max) y_max = y;
+        }
+        bounds_ready = true;
+    }
+
+    // 帯が端から端まで流れきるまでの時間。専用の速度設定を使う。通常LED/レイヤー
+    // 連動LEDのrgb_matrix_config.speedとは独立（本関数は選択式のエフェクトではなく、
+    // それらの設定を一時的に上書きして表示するものなので、共有のspeedを読んでも
+    // 意味のある値とは限らないため）。分割両ハーフはそれぞれ別のEEPROMを持つため
+    // kb_gesture_wave_speed_get()をここで直接呼ぶとハーフ間で値がずれる恐れがあり、
+    // 代わりに発火のたびにkeyball.cがRPCで両ハーフへ配ったkeyball.gesture_wave_speed
+    // を読む（詳細はkeyball.hのコメント参照）。
+    const uint16_t WAVE_MS    = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    // 帯の太さ（g_led_config.point座標系での幅）。左右(x)方向の座標範囲は上下(y)方向
+    // より1.4倍程度広いため、同じ太さのままだと左右に振った時だけ帯が範囲全体に
+    // 占める割合が小さく、光り方が小さく見えていた（2026-09-29判明）。左右方向だけ
+    // 太さを広げて釣り合わせる。
+    const uint8_t WAVE_WIDTH_V = 20;  // 上下方向
+    const uint8_t WAVE_WIDTH_H = 28;  // 左右方向
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // オーバーレイ時はアンダーグローに一切触れない（下で動いている通常LED/
+            // レイヤー連動LEDのエフェクトがそのまま見える）。全体上書き時（LEDオフ
+            // 設定中のみ）は、元々消灯していたので消灯のままにする。
+            if (overlay) continue;
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;
+        } else {
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;
+            for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+                if (!keyball.gesture_wave_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(keyball.gesture_wave_start[s]);
+                if (elapsed >= WAVE_MS) continue;
+
+                uint8_t dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
+                bool    horizontal = (dir == 2 || dir == 3);
+                uint8_t WAVE_WIDTH = horizontal ? WAVE_WIDTH_H : WAVE_WIDTH_V;
+                uint8_t coord      = horizontal ? g_led_config.point[i].x : g_led_config.point[i].y;
+                uint8_t range_min  = horizontal ? x_min : y_min;
+                uint8_t range_max  = horizontal ? x_max : y_max;
+                uint16_t range     = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
+
+                // 起点: 下(1)は上端(y_min)から進む。上(0)は下端(y_max、QMKの座標系は
+                // yが下ほど大きいため「下」に相当)から進む。
+                // 左右方向は実機確認の結果、g_led_config.point.xの大小が実際の左右とは
+                // 逆だったため(2026-09-09)、上下とは別に反転させている: 右(3)は右端
+                // (x_max)から、左(2)は左端(x_min)から進む。
+                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
+                uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
+
+                // 経過時間による全体フェードはかけない（本人希望：光ったらすぐ消える、
+                // じわじわ暗くなる演出は不要）。帯の位置からの距離だけで明るさを決めるので、
+                // 帯が通り過ぎたLEDはすぐ消灯し、帯がまだ来ていないLEDも光らない。
+                int16_t d = (int16_t)coord - (int16_t)wave_coord;
+                if (d < 0) d = -d;
+                if (d < WAVE_WIDTH) {
+                    // 明るさはジェスチャー専用の設定値(keyball.gesture_wave_val)を
+                    // ピークとしてスケールする（2026-09-29〜。以前は常に255固定
+                    // だったが、本人希望で明るさも個別調整できるようにした）。
+                    uint8_t bright = (uint8_t)(255 - ((uint32_t)d * 255 / WAVE_WIDTH));
+                    uint8_t v      = (uint8_t)(((uint16_t)bright * keyball.gesture_wave_val) / 255);
+                    if (v > out.v) {
+                        // 色相・彩度もジェスチャー専用の設定値を使う（本人希望、2026-09-29〜。
+                        // 以前は常にrgb_matrix_config.hsv＝その時点で表示中の通常LED/
+                        // レイヤー連動LEDの色をそのまま使っていた）。
+                        out.h = keyball.gesture_wave_hue;
+                        out.s = keyball.gesture_wave_sat;
+                        out.v = v;  // 帯同士が重なる場合は明るい方を採用
+                    }
+                }
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+
+    // スロットの後片付け（表示時間切れのactive解除）はkeyball_gesture_wave_task()
+    // 側に一元化した（2026-09-29）。以前はここでしか行っておらず、レイヤー連動LEDに
+    // RGB_MATRIXモードを奪われている間はこの関数自体が呼ばれず後片付けができない
+    // ままになり、スロットが永久にactiveのまま固まって以後ウェーブが発火しなくなる
+    // 不具合があった（詳細はkeyball.cのkeyball_gesture_wave_task()コメント参照）。
+
+}
+
+static bool GESTURE_WAVE(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    gesture_wave_render_sharp(led_min, led_max, false);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// TRACKBALL_BREATH: GESTURE_WAVEを基準に作った「もう一つのスタイル」。「帯の範囲に
+// 入っているかどうか」の判定式はGESTURE_WAVEと完全に同一（速度・幅・起点も同じ）。
+// これにより光る場所・タイミングがGESTURE_WAVEと完全に一致する（判定式がわずかでも
+// 違うと「シャープでは光るのにブリージングでは光らない」箇所が生まれてしまうため、
+// 2026-09-29、このように統一した）。常時点灯がアンダーグローだけである点、色相・
+// 彩度がジェスチャー専用の設定値をそのまま使う点もGESTURE_WAVEと同じ。
+// 違うのは「点灯・消灯のなめらかさ」だけ:
+//   ・GESTURE_WAVEは帯の範囲に入った瞬間に明るさが距離だけで決まり、範囲を外れた
+//     瞬間に即座に消灯する
+//   ・こちらは、帯の範囲に入っている間はFADE_IN_MSかけてゆっくり明るくなり、範囲を
+//     外れた後はFADE_OUT_MSかけてゆっくり暗くなる（本人希望「消灯時は通常エフェクト
+//     のブリージングのようにゆっくり消える。点灯時も同様にゆっくり光るように」、
+//     2026-09-29）。範囲を外れた瞬間の明るさから減衰を始めるため、フェードインの
+//     途中で範囲を外れても不自然に飛ばない。
+// どちらを描画するかはkeyball_gesture_wave_task()がkb_gesture_wave_style_get()の
+// 設定でRGB_MATRIXモードを切り替えて選ぶため、この関数自体はGESTURE_WAVEと同じ
+// スロットを読むだけで、切り替えロジックは持たない。
+static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool overlay) {
+    if (led_max <= led_min) return;
+
+    uint8_t half_min = is_keyboard_left() ? 0 : 34;
+    uint8_t half_max = is_keyboard_left() ? 34 : RGB_MATRIX_LED_COUNT;
+
+    static bool    bounds_ready = false;
+    static uint8_t x_min, x_max, y_min, y_max;
+    if (!bounds_ready) {
+        x_min = y_min = 255;
+        x_max = y_max = 0;
+        for (uint8_t i = half_min; i < half_max; i++) {
+            uint8_t x = g_led_config.point[i].x;
+            uint8_t y = g_led_config.point[i].y;
+            if (x < x_min) x_min = x;
+            if (x > x_max) x_max = x;
+            if (y < y_min) y_min = y;
+            if (y > y_max) y_max = y;
+        }
+        bounds_ready = true;
+    }
+
+    // 帯の速さ・幅・起点はGESTURE_WAVEと完全に同じ式（keyball.cの
+    // gesture_wave_duration_ms()もこのWAVE_MSの式＋FADE_OUT_MSの猶予、という前提で
+    // 計算しているので、変更する場合はFADE_OUT_MSの値も含め必ず両方揃えること）。
+    const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    const uint8_t  WAVE_WIDTH_V = 20;   // GESTURE_WAVEと同じ幅（上下方向）
+    const uint8_t  WAVE_WIDTH_H = 28;   // GESTURE_WAVEと同じ幅（左右方向。座標範囲が広い分太くしてある）
+    const uint16_t FADE_IN_MS   = 250;  // 帯の範囲に入ってから最大の明るさになるまでの時間
+    const uint16_t FADE_OUT_MS  = 600;  // 帯の範囲を外れてから消えきるまでの時間
+
+    // LEDごとに「前フレームで帯の範囲に入っていたか」と、その状態が最後に切り替わった
+    // 時刻・明るさを記憶しておく（点灯・消灯それぞれのフェードの基準点。
+    // REACTIVE_KEYS/TWINKLEと同じ、LEDの数だけ独立したスロットを持つ方式）。
+    static bool     gate_prev[RGB_MATRIX_LED_COUNT];
+    static uint16_t on_since[RGB_MATRIX_LED_COUNT];
+    static uint16_t off_since[RGB_MATRIX_LED_COUNT];
+    static uint8_t  off_peak[RGB_MATRIX_LED_COUNT];
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        HSV out;
+        if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) {
+            // オーバーレイ時はアンダーグローに一切触れない（下で動いている通常LED/
+            // レイヤー連動LEDのエフェクトがそのまま見える）。全体上書き時（LEDオフ
+            // 設定中のみ）は、元々消灯していたので消灯のままにする。
+            if (overlay) continue;
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;
+        } else {
+            out.h = 0;
+            out.s = 0;
+            out.v = 0;  // 基本は消灯（GESTURE_WAVEと同じ。常時点灯はアンダーグローのみ）
+
+            // 帯の範囲に入っているかどうかの判定はGESTURE_WAVEと全く同じ式を使う。
+            bool gate = false;
+            for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
+                if (!keyball.gesture_wave_active[s]) continue;
+                uint16_t elapsed = timer_elapsed(keyball.gesture_wave_start[s]);
+                if (elapsed >= WAVE_MS) continue;
+
+                uint8_t  dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
+                bool     horizontal = (dir == 2 || dir == 3);
+                uint8_t  WAVE_WIDTH = horizontal ? WAVE_WIDTH_H : WAVE_WIDTH_V;
+                uint8_t  coord      = horizontal ? g_led_config.point[i].x : g_led_config.point[i].y;
+                uint8_t  range_min  = horizontal ? x_min : y_min;
+                uint8_t  range_max  = horizontal ? x_max : y_max;
+                uint16_t range      = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
+
+                // 起点・向きの反転はGESTURE_WAVEと同じ実機確認済みの値を使う
+                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
+                uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
+
+                int16_t d = (int16_t)coord - (int16_t)wave_coord;
+                if (d < 0) d = -d;
+                if (d < WAVE_WIDTH) {
+                    gate = true;
+                    break;
+                }
+            }
+
+            uint8_t env;
+            if (gate) {
+                if (!gate_prev[i]) on_since[i] = timer_read();  // 消灯→点灯に切り替わった瞬間
+                uint16_t t = timer_elapsed(on_since[i]);
+                env         = (t >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t * 255) / FADE_IN_MS);
+            } else {
+                if (gate_prev[i]) {
+                    // ちょうど今、帯の範囲を外れた瞬間。その時点の明るさを記録して
+                    // そこからフェードアウトを始める（フェードイン途中でも不自然に
+                    // 飛ばないようにするため）。
+                    off_since[i]  = timer_read();
+                    uint16_t t_on = timer_elapsed(on_since[i]);
+                    off_peak[i]   = (t_on >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t_on * 255) / FADE_IN_MS);
+                }
+                uint16_t t = timer_elapsed(off_since[i]);
+                env         = (t >= FADE_OUT_MS) ? 0 : (uint8_t)(((uint32_t)off_peak[i] * (FADE_OUT_MS - t)) / FADE_OUT_MS);
+            }
+            gate_prev[i] = gate;
+
+            // GESTURE_WAVEと同じく、色相・彩度はジェスチャー専用の設定値をそのまま
+            // 使う（ブレンドしない）。明るさだけを、設定値(peak)をenvの割合で
+            // スケールして使う。
+            if (env > 0) {
+                out.h = keyball.gesture_wave_hue;
+                out.s = keyball.gesture_wave_sat;
+                out.v = (uint8_t)(((uint16_t)env * keyball.gesture_wave_val) / 255);
+            }
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb(out);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+
+}
+
+static bool TRACKBALL_BREATH(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    gesture_wave_render_breath(led_min, led_max, false);
+    return rgb_matrix_check_finished_leds(led_max);
+}
+// ジェスチャーウェーブを、今動いている通常LED/レイヤー連動LEDのエフェクトの「上に」
+// 重ねて描く（keymap.cのrgb_matrix_indicators_advanced_userから呼ぶ）。2026-10-02、
+// 本人指摘「ウェーブ時にアンダーグローの色が変わる」への根本対応。以前はウェーブ中だけ
+// RGB_MATRIXモード自体をGESTURE_WAVEへ切り替えていたため、アンダーグローの色をウェーブ
+// 側で何かしら決めて描く必要があり、どの色(レイヤー0の色/表示中レイヤーの色)を選んでも
+// 直前の表示と食い違う場面が残っていた。重ね描きならアンダーグローには一切触れない。
+bool keyball_gesture_wave_overlay(uint8_t led_min, uint8_t led_max) {
+    if (!keyball_gesture_wave_drawing() || keyball_gesture_wave_overriding()) return false;
+    if (keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH) {
+        gesture_wave_render_breath(led_min, led_max, true);
+    } else {
+        gesture_wave_render_sharp(led_min, led_max, true);
+    }
+    return false;
+}
+#endif // GESTURE_ENABLE
+
+#endif // RGB_MATRIX_CUSTOM_EFFECT_IMPLS

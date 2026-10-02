@@ -92,6 +92,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #elif (PRODUCT_ID & 0xff00) == 0x0700
 // keyball-rp2040-firmware（Keyball+ RP2040版）。基板形状はAVR版Keyball+と同一のため139として扱う。
 #    define KEYBALL_MODEL 139
+#elif (PRODUCT_ID & 0xff00) == 0x0800
+// keyball-rp2040-firmware（Keyball44 RP2040版）。基板形状はAVR版Keyball44と同一のため44として扱う。
+#    define KEYBALL_MODEL 44
+#elif (PRODUCT_ID & 0xff00) == 0x0900
+// keyball-rp2040-firmware（Keyball61 RP2040版）。基板形状はAVR版Keyball61と同一のため61として扱う。
+#    define KEYBALL_MODEL 61
 #endif
 
 #define KEYBALL_OLED_MAX_PRESSING_KEYCODES 6
