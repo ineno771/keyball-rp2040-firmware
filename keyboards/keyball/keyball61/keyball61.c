@@ -38,53 +38,62 @@ matrix_row_t matrix_mask[MATRIX_ROWS] = {
 // clang-format on
 
 #ifdef RGB_MATRIX_ENABLE
-// LED配置。【暫定・仮置き】2026-10-02時点では実機の配線情報が未入手のため、全LEDを
-// キー連動扱い・キーとの対応なし(NO_LED)・座標は左右に等間隔で並べただけの仮の値にして
-// ある（ソリッド・ブリージング等の全体点灯系は動くが、リアクティブ等のキー反応系・
-// アンダーグローの区別・波紋の位置は正しく動かない）。本人から配線順を受け取り次第、
-// Keyball+（keyballplus.c）と同じ形式で確定値に置き換えること。
-// LEDインデックスの並び: ボール搭載側34個(idx0-33) → 非搭載側37個(idx34-70)
-// （config.hのRGB_MATRIX_SPLIT { 34, 37 }と対応。ボール搭載側を
-// is_keyboard_left()=true側として扱う前提はKeyball+と同じ。keymap.c参照）。
+// LED配置（2026-10-05、本人が左手ボールの実機で「LED位置実測（開発用）」を使い1個ずつ
+// 確認した配線情報に基づく確定値）。キー名は左手ボール時のもの（ボール搭載側=L）。
+//
+// ボール搭載側（34個、idx0-33）: アンダーグロー7個(idx0-6)→キー連動27個(idx7-33)。
+//   キー連動は外側の列から「列0(L00,L10,L20,L30,L40)→列1(…L41)→列2(…L32)→列3(…L33)→
+//   列4(…L34)→列5(…L35)→L36」。最下段のL45・L46はLEDなし（近くにアンダーグローidx0）。
+// 非搭載側（37個、idx34-70）: キー連動29個(idx34-62)→アンダーグロー8個(idx63-70)。
+//   キー連動は内側から「R36→列5(R05,R15,R25,R35)→列4(…R34)→列3(…R33,R43)→列2(…R42)→
+//   列1(…R41)→列0(…R40)」。最下段のR44〜R46はLEDなし。
+//
+// matrix_coの行0-4=ボール搭載側・行5-9=非搭載側（Keyball+・44と同じ規則。ボールが基板本来の
+// is_keyboard_left()=false側にある場合はkeymap.cが行を入れ替える）。duplex matrixのため
+// 物理列3以降はマトリクス列+1（列3は欠番）。物理座標はキー配列からの概算値（アンダーグローは
+// 本人申告の位置から）で、x方向は各ハーフの外側の列をボール側はx小・非搭載側はx大に置く規則。
 led_config_t g_led_config = {
     {
-        // キーマトリクス(10行 x 8列) → LEDインデックス（暫定: 対応なし）
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
-        { NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        // キーマトリクス(10行 x 8列) → LEDインデックス
+        {      7,     12,     17, NO_LED,     21,     25,     29, NO_LED },
+        {      8,     13,     18, NO_LED,     22,     26,     30, NO_LED },
+        {      9,     14,     19, NO_LED,     23,     27,     31, NO_LED },
+        {     10,     15,     20, NO_LED,     24,     28,     32,     33 },
+        {     11,     16, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED, NO_LED },
+        {     58,     53,     48, NO_LED,     43,     39,     35, NO_LED },
+        {     59,     54,     49, NO_LED,     44,     40,     36, NO_LED },
+        {     60,     55,     50, NO_LED,     45,     41,     37, NO_LED },
+        {     61,     56,     51, NO_LED,     46,     42,     38,     34 },
+        {     62,     57,     52, NO_LED,     47, NO_LED, NO_LED, NO_LED },
     },
     {
-        // LEDインデックス → 物理座標(x,y)（暫定）
-        {0,32}, {3,32}, {6,32}, {9,32}, {12,32}, {15,32}, {18,32}, {21,32}, {24,32}, {27,32},
-        {30,32}, {33,32}, {36,32}, {39,32}, {42,32}, {45,32}, {48,32}, {51,32}, {54,32}, {57,32},
-        {60,32}, {63,32}, {66,32}, {69,32}, {72,32}, {75,32}, {78,32}, {81,32}, {84,32}, {87,32},
-        {90,32}, {93,32}, {96,32}, {100,32}, {124,32}, {126,32}, {129,32}, {132,32}, {135,32}, {137,32},
-        {140,32}, {143,32}, {146,32}, {149,32}, {151,32}, {154,32}, {157,32}, {160,32}, {162,32}, {165,32},
-        {168,32}, {171,32}, {174,32}, {176,32}, {179,32}, {182,32}, {185,32}, {187,32}, {190,32}, {193,32},
-        {196,32}, {199,32}, {201,32}, {204,32}, {207,32}, {210,32}, {212,32}, {215,32}, {218,32}, {221,32},
-        {224,32},
+        // LEDインデックス(0-70) → 物理座標(x,y)
+        {60,49}, {54,42}, {42,42}, {0,49}, {0,21}, {18,0}, {42,0}, {0,0}, {0,14}, {0,28},
+        {0,42}, {0,56}, {12,0}, {12,14}, {12,28}, {12,42}, {12,56}, {24,0}, {24,14}, {24,28},
+        {24,42}, {36,0}, {36,14}, {36,28}, {36,42}, {48,0}, {48,14}, {48,28}, {48,42}, {60,0},
+        {60,14}, {60,28}, {60,42}, {72,42}, {152,42}, {164,0}, {164,14}, {164,28}, {164,42}, {176,0},
+        {176,14}, {176,28}, {176,42}, {188,0}, {188,14}, {188,28}, {188,42}, {188,56}, {200,0}, {200,14},
+        {200,28}, {200,42}, {200,56}, {212,0}, {212,14}, {212,28}, {212,42}, {212,56}, {224,0}, {224,14},
+        {224,28}, {224,42}, {224,56}, {182,0}, {206,0}, {224,21}, {224,49}, {200,49}, {176,49}, {164,49},
+        {152,49},
     },
     {
-        // LEDインデックス → フラグ（暫定: 全てキー連動扱い）
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
-        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        // LEDインデックス → フラグ
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
         LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT,
+        LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_KEYLIGHT, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW, LED_FLAG_UNDERGLOW,
+        LED_FLAG_UNDERGLOW,
     },
 };
 #endif
