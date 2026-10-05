@@ -105,73 +105,19 @@ static bool duplex_scan(matrix_row_t current_matrix[]) {
     return changed;
 }
 
-#ifdef SPLIT_KEYBOARD
-static uint8_t thisHand, thatHand;
-#else
-#    define thisHand 0
-#endif
+// 2026-10-05: RP2040版用に、今のQMKの「CUSTOM_MATRIX = lite」の作法に合わせて書き直した。
+// 以前は古いQMK向けの作りで、matrix_init_custom()内でsplit_pre_init()/split_post_init()を
+// 呼び、matrix_scan()も丸ごと自前で持って左右間の転送(transport_master/slave)まで
+// 行っていた。今のQMKはこれらをkeyboard.c・matrix_common.c（matrix_init/matrix_scan/
+// matrix_post_scan）が自分で行うため、二重に初期化されてRP2040では起動しなかった
+// （本人報告「Keyball61のファームウェアを書き込みましたが起動しません」）。
+// ここでは「このハーフのキーを読む」ことだけを担当し、左右間のやりとりはQMK本体に任せる。
 
 void matrix_init_custom(void) {
-#ifdef SPLIT_KEYBOARD
-    split_pre_init();
-#endif
-
     set_pins_input(col_pins, PINNUM_COL);
     set_pins_input(row_pins, PINNUM_ROW);
-
-#ifdef SPLIT_KEYBOARD
-    thisHand = isLeftHand ? 0 : ROWS_PER_HAND;
-    thatHand = ROWS_PER_HAND - thisHand;
-
-    split_post_init();
-#endif
 }
 
-#ifdef SPLIT_KEYBOARD
-
-// user-defined overridable functions
-__attribute__((weak)) void matrix_slave_scan_kb(void) {
-    matrix_slave_scan_user();
-}
-
-__attribute__((weak)) void matrix_slave_scan_user(void) {}
-
-#endif
-
-// declare matrix buffers which defined in quantum/matrix_common.c
-extern matrix_row_t raw_matrix[MATRIX_ROWS];
-extern matrix_row_t matrix[MATRIX_ROWS];
-
-uint8_t matrix_scan(void) {
-    bool changed = duplex_scan(raw_matrix);
-
-    debounce(raw_matrix, matrix + thisHand, ROWS_PER_HAND, changed);
-
-#ifdef SPLIT_KEYBOARD
-    if (!is_keyboard_master()) {
-        // send to primary.
-        transport_slave(matrix + thatHand, matrix + thisHand);
-        matrix_slave_scan_kb();
-        return changed;
-    }
-
-    // receive from secondary.
-    static bool   last_connected = false;
-    matrix_row_t* that_raw       = raw_matrix + ROWS_PER_HAND;
-    memset(that_raw, 0, MATRIXSIZE_PER_HAND);
-    if (transport_master_if_connected(matrix + thisHand, that_raw)) {
-        last_connected = true;
-        if (memcmp(matrix + thatHand, that_raw, MATRIXSIZE_PER_HAND) != 0) {
-            memcpy(matrix + thatHand, that_raw, MATRIXSIZE_PER_HAND);
-            changed = true;
-        }
-    } else if (last_connected) {
-        last_connected = false;
-        memset(matrix + thatHand, 0, MATRIXSIZE_PER_HAND);
-        changed = true;
-    }
-#endif
-
-    matrix_scan_kb();
-    return changed;
+bool matrix_scan_custom(matrix_row_t current_matrix[]) {
+    return duplex_scan(current_matrix);
 }
