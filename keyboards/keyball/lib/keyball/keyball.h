@@ -409,6 +409,10 @@ void keyball_set_scrollsnap_mode(keyball_scrollsnap_mode_t mode);
 
 /// keyball_get_scroll_div gets current scroll divider.
 /// See also keyball_set_scroll_div for the scroll divider's detail.
+/// keyball_motion_is_left reports whether this half is physically the left hand, used only for
+/// trackball orientation. Overridden by keymaps that redefine is_keyboard_left().
+bool keyball_motion_is_left(void);
+
 uint8_t keyball_get_scroll_div(void);
 
 /// keyball_set_scroll_div changes scroll divider.

@@ -548,6 +548,15 @@ bool is_keyboard_left(void) {
     return keyball.this_have_ball;
 }
 
+
+// ボールの向きの補正は基板本来の左右で行う（keyball.cのkeyball_motion_is_left参照）。
+bool keyball_motion_is_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    return (bool)g_hw_is_left;
+}
+
 #ifdef RGB_MATRIX_ENABLE
 // 上記(2)の対処。「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側
 // だったか」を判定し、そうであればg_led_config.matrix_coの行0-3⇔4-7を入れ替える。

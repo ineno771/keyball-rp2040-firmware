@@ -515,6 +515,14 @@ static inline bool should_report(void) {
     return true;
 }
 
+// ボールの向きの補正（is_leftで符号を反転させる処理）に使う「このハーフは左手か」。
+// 既定はis_keyboard_left()。44・61・+のkeymap.cはis_keyboard_left()を「ボール搭載側=左」に
+// 上書きしているため、こちらは基板本来の左右(AVR版と同じ値)を返すよう上書きする
+// （2026-10-06、左手ボールのKeyball61でカーソルが上下左右とも反転していた不具合の修正）。
+__attribute__((weak)) bool keyball_motion_is_left(void) {
+    return is_keyboard_left();
+}
+
 report_mouse_t pointing_device_driver_get_report(report_mouse_t rep) {
     // fetch from optical sensor.
     if (keyball.this_have_ball) {
@@ -529,8 +537,8 @@ report_mouse_t pointing_device_driver_get_report(report_mouse_t rep) {
     // report mouse event, if keyboard is primary.
     if (is_keyboard_master() && should_report()) {
         // modify mouse report by PMW3360 motion.
-        motion_to_mouse(&keyball.this_motion, &rep, is_keyboard_left(), keyball.scroll_mode);
-        motion_to_mouse(&keyball.that_motion, &rep, !is_keyboard_left(), keyball.scroll_mode ^ keyball.this_have_ball);
+        motion_to_mouse(&keyball.this_motion, &rep, keyball_motion_is_left(), keyball.scroll_mode);
+        motion_to_mouse(&keyball.that_motion, &rep, !keyball_motion_is_left(), keyball.scroll_mode ^ keyball.this_have_ball);
         // store mouse report for OLED.
         keyball.last_mouse = rep;
     }
