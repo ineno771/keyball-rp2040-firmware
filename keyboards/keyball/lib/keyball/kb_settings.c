@@ -358,13 +358,21 @@ void kb_layer_led_enable_set(bool v) {
 
 // ── レイヤー別LED設定 ────────────────────────────────────────
 // 呼び出し頻度が低い（レイヤー切替時とWeb UI表示時のみ）ためキャッシュせず毎回EEPROMを読む。
+// 未保存の時の既定値は色相・彩度・明るさ・速さすべて最大（2026-10-06、本人希望）。
+// RP2040のEEPROMは未書込み領域が0x00になる（AVRは0xFF）ため、以前は未保存の行を
+// 「OFF・全部0」の有効な設定として読んでしまい、Web UIで有効にすると色が全て0から
+// 始まっていた。全バイト0の行は未保存とみなして既定値を返す。
 kb_layer_led_t kb_layer_led_get(uint8_t layer) {
-    kb_layer_led_t cfg = { .enabled = 0, .effect_id = 0, .hue = 0, .sat = 255, .val = 150, .speed = 128 };
+    kb_layer_led_t cfg = { .enabled = 0, .effect_id = 0, .hue = 255, .sat = 255, .val = 255, .speed = 255 };
     if (layer >= 1 && layer <= KB_LAYER_LED_MAX_LAYER) {
         uint16_t addr = KB_LAYER_LED_TABLE_EEPROM + (uint16_t)(layer - 1) * KB_LAYER_LED_ENTRY_SIZE;
         uint8_t  buf[KB_LAYER_LED_ENTRY_SIZE];
         eeprom_read_block(buf, (const void *)(uintptr_t)addr, KB_LAYER_LED_ENTRY_SIZE);
-        if (buf[0] <= 1) {  // 0/1以外（未初期化の0xFF等）は既定値のまま
+        bool all_zero = true;
+        for (uint8_t i = 0; i < KB_LAYER_LED_ENTRY_SIZE; i++) {
+            if (buf[i] != 0) all_zero = false;
+        }
+        if (buf[0] <= 1 && !all_zero) {  // 0/1以外（AVRの未初期化0xFF等）・全部0（RP2040の未書込み）は既定値のまま
             cfg.enabled   = buf[0];
             cfg.effect_id = buf[1];
             cfg.hue       = buf[2];
@@ -395,9 +403,16 @@ kb_led_config_t kb_led_config_get(void) {
     if (!g_led_config_loaded) {
         uint8_t buf[sizeof(kb_led_config_t)];
         eeprom_read_block(buf, (const void *)(uintptr_t)KB_LED_CONFIG_EEPROM, sizeof(buf));
-        if (buf[0] == 0xFF) {
-            // 未初期化。RGBLIGHT_DEFAULT_MODE(呼吸)相当のそれらしい既定値にしておく。
-            g_led_config = (kb_led_config_t){.effect_id = 2, .hue = 170, .sat = 255, .val = 100, .speed = 128};
+        bool all_zero = true;
+        for (uint8_t i = 0; i < sizeof(buf); i++) {
+            if (buf[i] != 0) all_zero = false;
+        }
+        if (buf[0] == 0xFF || all_zero) {
+            // 未初期化（AVRは0xFF、RP2040は未書込みが全部0x00）。以前は0xFFしか見ておらず、
+            // RP2040では色相・彩度・明るさ・速さが全て0の状態で始まっていた（2026-10-06修正）。
+            // 既定値は呼吸エフェクト、数値はすべて最大（本人希望）。明るさは
+            // RGB_MATRIX_MAXIMUM_BRIGHTNESSで実際には上限に抑えられる。
+            g_led_config = (kb_led_config_t){.effect_id = 2, .hue = 255, .sat = 255, .val = 255, .speed = 255};
         } else {
             memcpy(&g_led_config, buf, sizeof(buf));
         }
