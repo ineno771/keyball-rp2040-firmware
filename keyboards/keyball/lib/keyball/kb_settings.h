@@ -31,12 +31,7 @@
 _Static_assert(KB_SETTINGS_EEPROM_BASE >= KB_DYNAMIC_KEYMAP_EEPROM_END_ASSUMED + 512,
                "kb_settings EEPROMがdynamic_keymap領域と衝突またはマージンが不足しています。KB_SETTINGS_EEPROM_BASEを見直してください。");
 
-// ジェスチャーのデフォルト割り当て（macブラウザ標準・修飾子付きキーコード）
-// 0x0800=LGUI(Cmd), 0x0200=LSFT, KC_LBRC=0x2F, KC_RBRC=0x30
-#define KB_GESTURE_DEFAULT_UP    0x0A2F  // Cmd+Shift+[ 前のタブ
-#define KB_GESTURE_DEFAULT_DOWN  0x0A30  // Cmd+Shift+] 次のタブ
-#define KB_GESTURE_DEFAULT_LEFT  0x082F  // Cmd+[ 戻る
-#define KB_GESTURE_DEFAULT_RIGHT 0x0830  // Cmd+] 進む
+// ジェスチャーモードごとの既定の割り当てはkb_settings.cのkb_gesture_mode_defaultsを参照。
 
 typedef struct {
     uint16_t tapping_term;   // 50-1000ms

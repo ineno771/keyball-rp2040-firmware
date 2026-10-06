@@ -1,6 +1,8 @@
 // Copyright 2024 keyball-custom contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "keycodes.h"
+#include "quantum_keycodes.h"
 #include "kb_settings.h"
 #include "eeprom.h"
 #include <stdbool.h>
@@ -129,6 +131,19 @@ void kb_gesture_th_v_set(uint8_t v) {
 
 // ── 複数ジェスチャーモード（kb_layer_led_get/setと同様のテーブル読み書きだが、
 //    呼び出し頻度がトラックボール移動のたびと高いため、こちらはRAMキャッシュする）──
+// 一度もWeb UIで保存していないモードの既定の割り当て（2026-10-06、本人指定）。
+// 並びは[0]上 [1]下 [2]左 [3]右。continuousは方向ごとの連続入力（bit0=上…bit3=右）。
+static const kb_gesture_mode_t kb_gesture_mode_defaults[KB_GESTURE_MODE_COUNT] = {
+    // ジェスチャー1: Ctrl+矢印
+    {.key = {LCTL(KC_UP), LCTL(KC_DOWN), LCTL(KC_LEFT), LCTL(KC_RIGHT)}, .continuous = 0},
+    // ジェスチャー2: 上下で音量、左右で画面の明るさ（左=暗く、右=明るく）
+    {.key = {KC_AUDIO_VOL_UP, KC_AUDIO_VOL_DOWN, KC_BRIGHTNESS_DOWN, KC_BRIGHTNESS_UP}, .continuous = 0},
+    // ジェスチャー3: 矢印のみ、4方向とも連続入力ON
+    {.key = {KC_UP, KC_DOWN, KC_LEFT, KC_RIGHT}, .continuous = 0x0F},
+    // ジェスチャー4: 上=Enter、下=Backspace、左=かな、右=英数
+    {.key = {KC_ENTER, KC_BACKSPACE, KC_LNG1, KC_LNG2}, .continuous = 0},
+};
+
 static kb_gesture_mode_t g_gesture_modes[KB_GESTURE_MODE_COUNT];
 static bool              g_gesture_modes_loaded = false;
 
@@ -154,16 +169,7 @@ static void kb_gesture_modes_ensure_loaded(void) {
         bool all_ff   = m.key[0] == 0xFFFF && m.key[1] == 0xFFFF && m.key[2] == 0xFFFF && m.key[3] == 0xFFFF;
         bool all_zero = m.key[0] == 0 && m.key[1] == 0 && m.key[2] == 0 && m.key[3] == 0 && m.continuous == 0 && m.layer == 0;
         if (all_ff || all_zero) {
-            if (i == 0) {
-                // モード1のみ、旧単一ジェスチャーと同じデフォルト割り当てを引き継ぐ
-                m.key[0] = KB_GESTURE_DEFAULT_UP;
-                m.key[1] = KB_GESTURE_DEFAULT_DOWN;
-                m.key[2] = KB_GESTURE_DEFAULT_LEFT;
-                m.key[3] = KB_GESTURE_DEFAULT_RIGHT;
-            } else {
-                m.key[0] = m.key[1] = m.key[2] = m.key[3] = 0;  // 未設定
-            }
-            m.continuous = 0;
+            m            = kb_gesture_mode_defaults[i];
             m.layer      = KB_LAYER_NONE;
         } else if (m.layer > 7) {
             m.layer = KB_LAYER_NONE;  // 範囲外は「なし」に補正
