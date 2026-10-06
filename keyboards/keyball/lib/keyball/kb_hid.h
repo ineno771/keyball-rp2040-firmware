@@ -129,3 +129,6 @@ void kb_led_config_sync_from_rgb_matrix(void);
 #define KB_LED_EFFECT_TOTAL_COUNT    20  // 有効なeffect_idの総数（0-19。6・10・12は欠番）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif
+
+// 連動レイヤー系の設定がWeb UIから変更された直後に呼ばれる（keymap.cで上書き。kb_hid.c参照）
+void kb_hid_layer_link_changed(void);

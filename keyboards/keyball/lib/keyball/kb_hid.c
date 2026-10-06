@@ -204,6 +204,14 @@ void kb_led_config_sync_from_rgb_matrix(void) {
 }
 #endif
 
+// 連動レイヤー系の設定（スクロール/超低速/ジェスチャーモードのレイヤー）が変わった時に
+// 呼ばれる。keymap.cが「今いるレイヤーに対する連動機能」を計算し直すために上書きする。
+// keymap.c側はレイヤー切替時と起動時にしかこれを計算しないため、呼ばないと「今いる
+// レイヤーで連動中の設定を『なし』に変えても、レイヤーを切り替えるまで連動したまま」に
+// なる（2026-10-06、本人報告「ジェスチャーレイヤーをなしにしてもレイヤー0から解除
+// できずカーソルが動かない」）。
+__attribute__((weak)) void kb_hid_layer_link_changed(void) {}
+
 void kb_hid_receive(uint8_t *data, uint8_t length) {
     uint8_t response[RAW_PACKET_SIZE] = {0};
     uint8_t cmd = data[0];
@@ -476,6 +484,7 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             s.aml_threshold = data[7] ? data[7] : 10;
             kb_settings_set(&s);
             kb_scroll_layer_set(data[8]);  // スクロールレイヤー（0-7 / 0xFE=なし）
+            kb_hid_layer_link_changed();
 #ifdef AUTO_SHIFT_ENABLE
             if (s.flags & KB_FLAG_AUTO_SHIFT) autoshift_enable();
             else autoshift_disable();
@@ -531,6 +540,7 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             m.continuous = data[10];
             m.layer      = data[11];
             kb_gesture_mode_set(mode, &m);
+            kb_hid_layer_link_changed();
             response[1] = KB_HID_STATUS_OK;
             break;
         }
@@ -778,6 +788,7 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         case KB_HID_CMD_SET_PRECISION: {
             kb_precision_div_set(data[1]);
             kb_precision_layer_set(data[2]);  // 連動レイヤー（0-7 / 0xFE=なし）
+            kb_hid_layer_link_changed();
             response[1] = KB_HID_STATUS_OK;
             break;
         }

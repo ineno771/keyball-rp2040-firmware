@@ -636,6 +636,11 @@ bool get_permissive_hold(uint16_t keycode, keyrecord_t *record) {
 // 「まだ計算していない＝連動なし」という初期値がそのレイヤーにいない状態と
 // 偶然一致するため問題が表面化しなかったが、レイヤー0は起動直後から実際に
 // 「そのレイヤーにいる」状態なので、初期値の「連動なし」のままズレてしまっていた。
+// Web UIで連動レイヤー系の設定が変わった時、今いるレイヤーに対して計算し直す（kb_hid.c参照）
+void kb_hid_layer_link_changed(void) {
+    kb_apply_layer_features(get_highest_layer(layer_state));
+}
+
 static void kb_apply_layer_features(uint8_t hl) {
 #if defined(RGBLIGHT_ENABLE) || defined(RGB_MATRIX_ENABLE)
     // レイヤー連動LED: 有効化しているレイヤーに専用の光り方を設定していると、そのレイヤーに
