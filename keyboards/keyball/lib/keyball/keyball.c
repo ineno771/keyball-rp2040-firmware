@@ -641,6 +641,43 @@ void keyball_gesture_wave_trigger(uint8_t direction, uint8_t mode) {
 
 #ifdef SPLIT_KEYBOARD
 
+// ── 起動時のLEDエフェクトの左右のずれをなくす（2026-10-07、本人報告）──
+// 電源を入れると、USBを挿していない側は自分がスレーブと判断するまで待ってから動き出す
+// ため、左右でエフェクトの始まりがずれたままになっていた（Web UIでLEDを変えると揃う）。
+// 左右の情報交換（GET_INFO）が終わった時点で、マスターがエフェクトを一度別のものに
+// 切り替えてすぐ戻すことで、既存のRGB_MATRIXの同期（PUT_RGB_MATRIX）に乗せて両側で
+// エフェクトを同時にかけ直す。新しいハーフ間通信は追加しない（定期RPCは増やさない方針）。
+#    ifdef RGB_MATRIX_ENABLE
+static uint8_t  g_led_resync_phase = 0;  // 0=なし 1=切り替え待ち 2=戻し待ち
+static uint8_t  g_led_resync_mode  = 0;
+static uint16_t g_led_resync_timer = 0;
+#    endif
+
+static void led_resync_request(void) {
+#    ifdef RGB_MATRIX_ENABLE
+    g_led_resync_phase = 1;
+#    endif
+}
+
+static void led_resync_task(void) {
+#    ifdef RGB_MATRIX_ENABLE
+    if (g_led_resync_phase == 1) {
+        if (!rgb_matrix_is_enabled()) {
+            g_led_resync_phase = 0;
+            return;
+        }
+        g_led_resync_mode = rgb_matrix_get_mode();
+        rgb_matrix_mode_noeeprom(g_led_resync_mode == RGB_MATRIX_SOLID_COLOR ? RGB_MATRIX_BREATHING : RGB_MATRIX_SOLID_COLOR);
+        g_led_resync_timer = timer_read();
+        g_led_resync_phase = 2;
+    } else if (g_led_resync_phase == 2 && timer_elapsed(g_led_resync_timer) >= 30) {
+        // 30ms待つ間に、切り替えたモードがスレーブへ送られる
+        rgb_matrix_mode_noeeprom(g_led_resync_mode);
+        g_led_resync_phase = 0;
+    }
+#    endif
+}
+
 static void rpc_get_info_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     keyball_info_t info = {
         .ballcnt = keyball.this_have_ball ? 1 : 0,
@@ -686,6 +723,7 @@ static void rpc_get_info_invoke(void) {
 #    endif
 
     keyball_on_adjust_layout(KEYBALL_ADJUST_PRIMARY);
+    led_resync_request();
 }
 
 static void rpc_get_motion_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
@@ -1325,6 +1363,7 @@ void keyboard_post_init_kb(void) {
 void housekeeping_task_kb(void) {
     if (is_keyboard_master()) {
         rpc_get_info_invoke();
+        led_resync_task();
         if (keyball.that_have_ball) {
             rpc_get_motion_invoke();
             rpc_set_cpi_invoke();
