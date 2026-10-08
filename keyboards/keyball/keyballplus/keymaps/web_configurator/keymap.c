@@ -554,8 +554,13 @@ bool keyball_motion_is_left(void) {
 // idx0-25」基準で固定のため、ボールが左手だと右手ボール時と比べて左右の向きが逆になる。
 // ジェスチャーウェーブ（rgb_matrix_user.inc）の左右の向きの補正に使う
 // （2026-10-07、左手ボールのKeyball+で左右が逆に流れると本人報告）。
-static bool g_ball_on_hw_left = true;
-bool kb_ball_on_physical_left(void) { return g_ball_on_hw_left; }
+// 【注意】基板本来のis_keyboard_left()（g_hw_is_left）は物理的な左右と一致しない。
+// 標準構成（ボール右手）ではボール搭載側＝物理的に右手の基板がis_keyboard_left()=真に
+// なる（config.hのコメント参照）。そのため「ボールがis_keyboard_left()=真の基板にある」
+// ＝物理的には右手ボール、偽の基板にある＝左手ボール、となる
+// （2026-10-08、初回の修正でここを物理的な左右と取り違えて直っていなかった）。
+static bool g_ball_on_hw_left = true;  // 判定前は標準構成（ボール右手）として扱う
+bool kb_ball_on_physical_left(void) { return !g_ball_on_hw_left; }
 
 // 上記(2)の対処。「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側
 // だったか」を判定し、そうであればg_led_config.matrix_coの行0-3⇔4-7を入れ替える。
