@@ -491,6 +491,77 @@ bool process_detected_host_os_kb(os_variant_t os) {
 // （keyboard_post_init_user()から起動直後の初期反映のために呼ぶ）。
 static void kb_apply_layer_features(uint8_t hl);
 
+// 2026-10-08
+// ボールを左右どちらの基板に付けても、LED（RGB_MATRIX）が正しく光るようにする処理。
+// Keyball+・44・61のkeymap.cと同じ内容（本人希望で39にも追加。詳しい経緯はKeyball+側の
+// コメント参照）。
+//
+// 背景:
+// (1) RGB_MATRIXのコアは、is_keyboard_left()が真の側にLED表の前半（RGB_MATRIX_SPLITの
+//     先頭22個）、偽の側に後半（24個）を割り当てる。g_led_config（keyball39.c）は
+//     「前半22個＝ボール側の基板」で作ってある。
+// (2) 基板本来のis_keyboard_left()は左手判定ジャンパーで決まり、ボールの有無とは無関係。
+//     しかもQMK 2024年の仕様変更（#22775）で、ジャンパーを付けた物理的な左手の基板が
+//     「右」と判定される（物理的な左右と常に逆）。
+//     → 右手ボールならボール側が「左」で(1)と一致するが、左手ボールでは一致しない。
+// 対処:
+// ・is_keyboard_left()を上書きし、ボールの検出後は「ボールがある側＝左（前半担当）」と答える。
+//   ボールの検出（keyboard_post_init_kbのpmw3360_init()）が終わるまでは本来の値を返す。
+//   キーマトリクスの行の割り当て（quantum/matrix.cのthisHand）や左右の通信の準備は
+//   起動直後に一度だけ本来の値で決まるため、この上書きの影響を受けない。
+// ・ボールの向きの補正は基板本来の左右で行う（keyball_motion_is_left）。
+// ・g_led_config.matrix_co（キー→LED）は「行0-3＝ボール側」前提。左手ボールでは行0-3に
+//   ボールなし側のキーが来るため、行0-3と4-7を入れ替える。
+// ・右手ボールでは上書き後の値も本来の値と同じになり、動作は今までと変わらない。
+// 注意: ボールなし（左右とも「右」と答える）・両側ボール（左右とも「左」）は未確認。
+static bool    g_ball_probe_ready = false;
+static int8_t  g_hw_is_left       = -1;  // 基板本来の（ジャンパーで決まる）値
+extern bool is_keyboard_left_impl(void);
+
+bool is_keyboard_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    if (!g_ball_probe_ready) {
+        return (bool)g_hw_is_left;
+    }
+    return keyball.this_have_ball;
+}
+
+// ボールの向きの補正は基板本来の左右で行う（keyball.cのkeyball_motion_is_left参照）。
+bool keyball_motion_is_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    return (bool)g_hw_is_left;
+}
+
+#ifdef RGB_MATRIX_ENABLE
+// ボールが物理的に左手側の基板にあるか。g_led_config.pointのx座標は右手ボールの実機で
+// 作った表のため、左手ボールではジェスチャーウェーブの左右の向きが逆になる。その補正に使う
+// （rgb_matrix_user.inc）。基板本来の判定は物理的な左右と逆なので、「ボールが
+// is_keyboard_left()=真の基板にある」＝物理的には右手ボール。
+static bool g_ball_on_hw_left = true;  // 判定前はLED座標表を作った構成（右手ボール）として扱う
+bool kb_ball_on_physical_left(void) { return !g_ball_on_hw_left; }
+
+// ボールが基板本来のis_keyboard_left()=偽の側にある（＝左手ボール）なら、matrix_coの
+// 行0-3と4-7を入れ替える。this_have_ball/g_hw_is_leftはどちらもこのハーフだけで
+// 決まる値のため、両ハーフが通信なしで同じ結論になる。
+static void kb_fixup_led_matrix_rows_if_needed(void) {
+    bool ball_is_on_hw_left_side = keyball.this_have_ball ? (bool)g_hw_is_left : !(bool)g_hw_is_left;
+    g_ball_on_hw_left            = ball_is_on_hw_left_side;
+    if (ball_is_on_hw_left_side) return;  // g_led_configの前提通りなので何もしない
+
+    for (uint8_t r = 0; r < MATRIX_ROWS / 2; r++) {
+        for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+            uint8_t tmp                                  = g_led_config.matrix_co[r][c];
+            g_led_config.matrix_co[r][c]                 = g_led_config.matrix_co[r + MATRIX_ROWS / 2][c];
+            g_led_config.matrix_co[r + MATRIX_ROWS / 2][c] = tmp;
+        }
+    }
+}
+#endif
+
 void keyboard_post_init_user(void) {
 #ifdef CONSOLE_ENABLE
     // 2026-09-09、原因調査用の一時的なデバッグ出力（qmk consoleで確認）。
@@ -528,6 +599,14 @@ void keyboard_post_init_user(void) {
     // いれば正しく反映されるようにする（kb_apply_layer_features側のコメント参照）。
     kb_apply_layer_features(get_highest_layer(layer_state));
     (void)s;
+
+    // this_have_ballはここまでの処理（keyboard_post_init_kbでのpmw3360_init()）で
+    // 確定済みなので、g_led_config.matrix_coの行入れ替えが必要か判定・実行してから、
+    // 以降is_keyboard_left()をthis_have_ball基準に切り替える。
+#ifdef RGB_MATRIX_ENABLE
+    kb_fixup_led_matrix_rows_if_needed();
+#endif
+    g_ball_probe_ready = true;
 }
 
 uint16_t get_tapping_term(uint16_t keycode, keyrecord_t *record) {
