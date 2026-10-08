@@ -559,6 +559,10 @@ bool keyball_motion_is_left(void) {
 // なる（config.hのコメント参照）。そのため「ボールがis_keyboard_left()=真の基板にある」
 // ＝物理的には右手ボール、偽の基板にある＝左手ボール、となる
 // （2026-10-08、初回の修正でここを物理的な左右と取り違えて直っていなかった）。
+// 理由: QMKのSPLIT_HAND_MATRIX_GRIDは交差点(F6,B5)が未接続(HIGH)なら左、接続(LOW)なら
+// 右と判定する（SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT未定義時）。Keyball+は物理的な左手の
+// 基板に「左手判定用」のジャンパーをはんだ付けするため、左手の基板が「右」と判定される
+// （ボールの位置とは無関係に、常に物理的な左右と逆。本人情報で判明）。
 static bool g_ball_on_hw_left = true;  // 判定前は標準構成（ボール右手）として扱う
 bool kb_ball_on_physical_left(void) { return !g_ball_on_hw_left; }
 
