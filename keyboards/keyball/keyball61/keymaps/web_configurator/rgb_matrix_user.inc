@@ -68,6 +68,9 @@ RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
+// keymap.cで定義。ボールが物理的に左手側にあるか（左手ボールで調整済みの表のため、右手ボールの時に左右を反転する）
+bool kb_ball_on_physical_left(void);
+
 // TRACKBALL専用: keyball.this_motion/that_motion（トラックボールの移動量）を
 // 読むために必要。書き込みは一切行わない（ポインタ移動処理には影響しない）。
 // keyball39.c等と同じく、keyboards/keyball/を基準にした相対パスで指定する
@@ -668,7 +671,7 @@ static void gesture_wave_render_sharp(uint8_t led_min, uint8_t led_max, bool ove
                 // 左右方向は実機確認の結果、g_led_config.point.xの大小が実際の左右とは
                 // 逆だったため(2026-09-09)、上下とは別に反転させている: 右(3)は右端
                 // (x_max)から、左(2)は左端(x_min)から進む。
-                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                bool     from_min        = horizontal ? ((dir == 2) == kb_ball_on_physical_left()) : (dir == 1);
                 uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
                 uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
 
@@ -799,7 +802,7 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
                 uint16_t range      = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
 
                 // 起点・向きの反転はGESTURE_WAVEと同じ実機確認済みの値を使う
-                bool     from_min        = horizontal ? (dir == 2) : (dir == 1);
+                bool     from_min        = horizontal ? ((dir == 2) == kb_ball_on_physical_left()) : (dir == 1);
                 uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
                 uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
 

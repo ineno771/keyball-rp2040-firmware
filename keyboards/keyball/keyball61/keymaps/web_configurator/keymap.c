@@ -558,12 +558,22 @@ bool keyball_motion_is_left(void) {
 }
 
 #ifdef RGB_MATRIX_ENABLE
+// ボールが物理的に左手側の基板にあるか。g_led_config.pointのx座標は「ボール搭載側」基準で
+// 固定のため、ボールの位置が変わるとジェスチャーウェーブの左右の向きが逆になる。その補正に使う
+// （rgb_matrix_user.inc。2026-10-08、Keyball+の左手ボールで発覚した不具合と同じ対処）。
+// 【注意】基板本来のis_keyboard_left()（g_hw_is_left）は物理的な左右と逆。QMK 2024年の
+// 仕様変更（#22775）で交差点短絡=右になったが、Keyballの基板は左手側を短絡させる設計のため。
+// よって「ボールがis_keyboard_left()=真の基板にある」＝物理的には右手ボール。
+static bool g_ball_on_hw_left = false;  // 判定前はLED座標表を作った構成（左手ボール）として扱う
+bool kb_ball_on_physical_left(void) { return !g_ball_on_hw_left; }
+
 // 上記(2)の対処。「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側
 // だったか」を判定し、そうであればg_led_config.matrix_coの行0-3⇔4-7を入れ替える。
 // this_have_ball/g_hw_is_leftはどちらもこのハーフだけで完結する値のため、
 // 両ハーフが独立に同じ結論に達する（相方との通信は不要）。
 static void kb_fixup_led_matrix_rows_if_needed(void) {
     bool ball_is_on_hw_left_side = keyball.this_have_ball ? (bool)g_hw_is_left : !(bool)g_hw_is_left;
+    g_ball_on_hw_left            = ball_is_on_hw_left_side;
     if (ball_is_on_hw_left_side) return;  // g_led_configの前提通りなので何もしない
 
     for (uint8_t r = 0; r < MATRIX_ROWS / 2; r++) {
