@@ -66,6 +66,12 @@ RGB_MATRIX_EFFECT(GESTURE_WAVE)
 RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 #endif
 
+// BOOT_WAIT / BOOT_SPREAD: 起動演出専用（2026-10-09、keyball.cのkeyball_boot_task参照）。
+// 起動直後は左右とも消灯して待ち（BOOT_WAIT）、左右がつながった瞬間にマスターが
+// BOOT_SPREADへ切り替える（同期で両側同時に始まる）。Web UIのLED_EFFECTS一覧には出さない。
+RGB_MATRIX_EFFECT(BOOT_WAIT)
+RGB_MATRIX_EFFECT(BOOT_SPREAD)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 // keymap.cで定義。ボールが物理的に左手側にあるか（右手ボールで調整済みの表のため、左手ボールの時に左右を反転する）
@@ -869,5 +875,44 @@ bool keyball_gesture_wave_overlay(uint8_t led_min, uint8_t led_max) {
     return false;
 }
 #endif // GESTURE_ENABLE
+
+// ── 起動演出（2026-10-09）──
+static bool BOOT_WAIT(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    for (uint8_t i = led_min; i < led_max; i++) {
+        rgb_matrix_set_color(i, 0, 0, 0);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// 左右の境目（物理座標x=112、全機種共通の0-224の中央）から外側へ、いつもの色の光が
+// 広がっていく。帯の先端は少しぼかす。広がりきった後は全体が点灯したまま、
+// keyball.cが元のLED設定に戻すのを待つ。
+static bool BOOT_SPREAD(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    static uint32_t start = 0;
+    if (params->init) start = g_rgb_timer;
+    const uint32_t SPREAD_MS = 900;  // 端まで広がる時間（演出全体は約1.5秒）
+    const int16_t  CENTER    = 112;
+    const int16_t  EDGE      = 40;   // 先端のぼかし幅
+    uint32_t       t         = g_rgb_timer - start;
+    int16_t        radius    = (t >= SPREAD_MS) ? 32767 : (int16_t)((uint32_t)(CENTER + EDGE) * t / SPREAD_MS);
+    HSV            base      = rgb_matrix_config.hsv;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        int16_t d = (int16_t)g_led_config.point[i].x - CENTER;
+        if (d < 0) d = -d;
+        uint8_t v;
+        if (d <= radius - EDGE) {
+            v = base.v;
+        } else if (d < radius) {
+            v = (uint8_t)((uint16_t)base.v * (uint16_t)(radius - d) / EDGE);
+        } else {
+            v = 0;
+        }
+        RGB rgb = rgb_matrix_hsv_to_rgb((HSV){base.h, base.s, v});
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
 
 #endif // RGB_MATRIX_CUSTOM_EFFECT_IMPLS

@@ -600,6 +600,7 @@ static gesture_wave_rpc_t g_gesture_wave_pending_payload;
 
 void keyball_gesture_wave_trigger(uint8_t direction, uint8_t mode) {
     if (!kb_gesture_wave_enable_get()) return;  // 機能自体がOFFなら何もしない
+    if (keyball_boot_active()) return;          // 起動演出中は出さない
     if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;  // 呼び出し元(keymap.c)のgst_active_modeは
                                                    // 常に0-5のはずだが念のため防御的にクランプ
 
@@ -678,6 +679,92 @@ static void led_resync_task(void) {
 #    endif
 }
 
+// ── 起動演出（2026-10-09、本人希望）──
+// 電源を入れると、USB側が先に光り、反対側が遅れて光り、最後にLEDが再スタートする、という
+// ばらばらな見た目だったため、次の流れにする:
+//   1) 起動直後は左右ともLED・OLEDを消したまま待つ（BOOT_WAIT）
+//   2) 左右の情報交換（GET_INFO）が済んだ瞬間に、マスターがLEDモードを起動演出
+//      （BOOT_SPREAD、中央から外へ光が広がる）に切り替える。反対側へは既存のRGB_MATRIXの
+//      同期（PUT_RGB_MATRIX）で伝わるので、新しいハーフ間通信は追加していない。
+//      OLEDは両ハーフとも「今のLEDモード」を見て起動演出（ドットが集まってロゴになる、
+//      oledkit.c）を表示する。
+//   3) KB_BOOT_ANIM_MS後に、マスターがいつものLED設定へ戻す（これも同期で両側に伝わり、
+//      エフェクトが左右同時に始まる）。OLEDもいつもの表示に戻る。
+// 反対側がつながっていない（片側だけで使う）場合は、KB_BOOT_FALLBACK_MS待って始める。
+// LEDを「オフ」に設定している場合、LEDは消えたままでOLEDだけ演出する（本人指定）。
+#    ifdef RGB_MATRIX_ENABLE
+#        define KB_BOOT_ANIM_MS 1500
+#        define KB_BOOT_FALLBACK_MS 4000
+#        define KB_BOOT_SLAVE_GIVEUP_MS 8000
+enum { KB_BOOT_WAIT = 0, KB_BOOT_ANIM = 1, KB_BOOT_DONE = 2 };
+static uint8_t  g_boot_phase      = KB_BOOT_DONE;  // keyball_boot_init()で WAIT にする
+static uint16_t g_boot_anim_start = 0;
+static uint8_t  g_boot_saved_mode = RGB_MATRIX_SOLID_COLOR;
+static bool     g_boot_negotiated = false;
+
+static bool boot_is_boot_mode(uint8_t mode) {
+    return mode == RGB_MATRIX_CUSTOM_BOOT_WAIT || mode == RGB_MATRIX_CUSTOM_BOOT_SPREAD;
+}
+
+// keyboard_post_init_kbから両ハーフで呼ぶ（いつものLED設定を反映した直後）
+static void keyball_boot_init(void) {
+    uint8_t mode      = rgb_matrix_get_mode();
+    g_boot_saved_mode = boot_is_boot_mode(mode) ? RGB_MATRIX_SOLID_COLOR : mode;
+    g_boot_phase      = KB_BOOT_WAIT;
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_BOOT_WAIT);  // オン/オフの状態はそのまま
+}
+
+static void boot_start_anim(void) {
+    g_boot_phase      = KB_BOOT_ANIM;
+    g_boot_anim_start = timer_read();
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_BOOT_SPREAD);
+}
+
+static void apply_layer_led_now(uint8_t hl);
+
+// 毎スキャン両ハーフで呼ぶ
+static void keyball_boot_task(void) {
+    if (g_boot_phase == KB_BOOT_DONE) return;
+    if (is_keyboard_master()) {
+        if (g_boot_phase == KB_BOOT_WAIT) {
+            if (g_boot_negotiated || timer_read32() >= KB_BOOT_FALLBACK_MS) boot_start_anim();
+        } else if (timer_elapsed(g_boot_anim_start) >= KB_BOOT_ANIM_MS) {
+            g_boot_phase = KB_BOOT_DONE;
+            // 演出中に押されたレイヤーも含め、今あるべきLED表示へ戻す
+            apply_layer_led_now(get_highest_layer(layer_state | default_layer_state));
+            // LEDオフ設定の時はモードが起動演出のまま残るので、元のモードへ戻す
+            // （反対側のOLEDがモードを見て演出を終えるため）
+            if (boot_is_boot_mode(rgb_matrix_get_mode())) rgb_matrix_mode_noeeprom(g_boot_saved_mode);
+        }
+    } else {
+        // スレーブはマスターから同期されたLEDモードで段階を判断する
+        uint8_t mode = rgb_matrix_get_mode();
+        if (mode == RGB_MATRIX_CUSTOM_BOOT_SPREAD) {
+            if (g_boot_phase != KB_BOOT_ANIM) {
+                g_boot_phase      = KB_BOOT_ANIM;
+                g_boot_anim_start = timer_read();
+            }
+        } else if (mode != RGB_MATRIX_CUSTOM_BOOT_WAIT || timer_read32() >= KB_BOOT_SLAVE_GIVEUP_MS) {
+            g_boot_phase = KB_BOOT_DONE;
+        }
+    }
+}
+
+bool keyball_boot_active(void) {
+    return g_boot_phase != KB_BOOT_DONE;
+}
+
+// oledkit.cの弱い関数を上書き。0=待機（消灯） 1=演出中（elapsedに経過ms） 2=終了
+uint8_t oledkit_boot_phase(uint16_t *elapsed_ms) {
+    if (g_boot_phase == KB_BOOT_ANIM && elapsed_ms) *elapsed_ms = timer_elapsed(g_boot_anim_start);
+    return g_boot_phase;
+}
+#    else
+bool keyball_boot_active(void) {
+    return false;
+}
+#    endif
+
 static void rpc_get_info_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     keyball_info_t info = {
         .ballcnt = keyball.this_have_ball ? 1 : 0,
@@ -723,6 +810,14 @@ static void rpc_get_info_invoke(void) {
 #    endif
 
     keyball_on_adjust_layout(KEYBALL_ADJUST_PRIMARY);
+#    ifdef RGB_MATRIX_ENABLE
+    // 起動待ちの間につながった時は起動演出を始める合図にする。演出が既に始まった・終わった後に
+    // 遅れてつながった時は、従来どおりエフェクトをかけ直して左右をそろえる。
+    if (g_boot_phase == KB_BOOT_WAIT) {
+        g_boot_negotiated = true;
+        return;
+    }
+#    endif
     led_resync_request();
 }
 
@@ -1067,6 +1162,8 @@ static void apply_layer_led_now(uint8_t hl) {
 }
 
 void keyball_apply_layer_led(uint8_t hl) {
+    // 起動演出中はLEDモードを奪わない（演出の終わりに今のレイヤーの表示へ戻す）
+    if (keyball_boot_active()) return;
 #if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)
     // ジェスチャー連動LEDウェーブの表示中は、レイヤー切り替えでRGB_MATRIXモードを
     // 奪わない（2026-09-29修正）。複数ジェスチャーモードはレイヤー切り替えで有効化
@@ -1125,6 +1222,7 @@ static uint16_t gesture_wave_duration_ms(void) {
 }
 
 void keyball_gesture_wave_task(void) {
+    if (keyball_boot_active()) return;  // 起動演出中はLEDモードを切り替えない
     // スロットの後片付け（表示時間を過ぎたらactiveを戻す）はここで行う。以前は
     // GESTURE_WAVE()描画関数の中でだけ行っていたが、レイヤー連動LED側が
     // RGB_MATRIXモードを奪っている間は描画関数自体が呼ばれず後片付けができない
@@ -1355,6 +1453,9 @@ void keyboard_post_init_kb(void) {
     // あったが、正式にkb_led_config経由になったので不要になった）。
     keyball_apply_normal_led();
 #endif
+#if defined(SPLIT_KEYBOARD) && defined(RGB_MATRIX_ENABLE)
+    keyball_boot_init();
+#endif
 
     keyboard_post_init_user();
 }
@@ -1372,6 +1473,9 @@ void housekeeping_task_kb(void) {
         rpc_gesture_wave_invoke();
 #endif
     }
+#ifdef RGB_MATRIX_ENABLE
+    keyball_boot_task();
+#endif
     // ウェーブのオーバーライド判定は両ハーフが自分のLED表示について独立に決めるため、
     // is_keyboard_master()の外（両ハーフで毎回実行）に置く。
 #if defined(GESTURE_ENABLE) && defined(RGB_MATRIX_ENABLE)

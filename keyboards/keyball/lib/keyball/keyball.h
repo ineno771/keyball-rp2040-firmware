@@ -397,6 +397,10 @@ void keyball_apply_normal_led(void);
 /// Call from layer_state_set_user with get_highest_layer(state).
 void keyball_apply_layer_led(uint8_t hl);
 
+// 起動演出（左右がつながってからLED・OLEDを同時に始める）の最中か（keyball.c参照）。
+// 演出中はレイヤー連動LED・ジェスチャーウェーブ・LED設定の読み戻しがLEDモードを触らない。
+bool keyball_boot_active(void);
+
 /// keyball_layer_led_overriding reports whether a layer's LED override is currently being
 /// displayed (as opposed to the normal/layer-0 config). SET_LED uses this to decide whether
 /// changing the normal config should also change what's currently on screen.

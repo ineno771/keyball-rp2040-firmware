@@ -161,6 +161,8 @@ void kb_led_config_sync_from_rgb_matrix(void) {
     // 頻繁に発火する状況ではSat等の変更がしばしば同期されずに消えてしまっていた）。
     if (keyball_gesture_wave_overriding()) sync_mode = false;
 #endif
+    // 起動演出中もモードは一時的な値（起動演出）なので同期しない
+    if (keyball_boot_active()) sync_mode = false;
 
     if (sync_mode) {
         uint8_t mode      = rgb_matrix_get_mode();
