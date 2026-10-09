@@ -1236,7 +1236,7 @@ static uint16_t gesture_wave_duration_ms(void) {
         // rgb_matrix_user.incのgesture_wave_render_breath()のFADE_IN_MS/FADE_OUT_MSと必ず
         // 同じ式にすること（ズレると、消えきる前にレイヤー連動LED側へ表示が戻ってしまう、
         // または逆に無駄に長く居座る）。2026-10-09: 消え方の変更に合わせて更新。
-        const uint16_t FADE_IN_MS  = (travel_ms / 4 < 40) ? 40 : travel_ms / 4;
+        const uint16_t FADE_IN_MS  = 400;
         const uint16_t FADE_OUT_MS = 400;
         return travel_ms + FADE_IN_MS + FADE_OUT_MS;
     }

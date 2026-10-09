@@ -774,11 +774,11 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
     const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
     const uint8_t  WAVE_WIDTH_V = 20;   // GESTURE_WAVEと同じ幅（上下方向）
     const uint8_t  WAVE_WIDTH_H = 28;   // GESTURE_WAVEと同じ幅（左右方向。座標範囲が広い分太くしてある）
-    // 帯の範囲に入ってから最大の明るさになるまでの時間。2026-10-09: 以前は250ms固定で、
-    // 速さを上げると帯が1つのLEDを通り過ぎる時間（最速で約120-150ms）の方が短くなり、
-    // 最大の明るさに届かず暗く見えていた（本人報告）。帯が流れきる時間の1/4にして、
-    // どの速さでも帯が通り過ぎる前に最大の明るさになるようにする（最遅900msで225ms＝ほぼ従来どおり）。
-    const uint16_t FADE_IN_MS   = (WAVE_MS / 4 < 40) ? 40 : WAVE_MS / 4;
+    // 帯の先端が届いてから最大の明るさになるまでの時間。2026-10-09: 本人希望「点灯時を
+    // もっとふわっと」で400msに延ばし、明るさの変化も一定の速さではなく、出だしと最後が
+    // ゆっくりの曲線（smoothstep）にした。全体が一緒に消える方式にしたので、帯が通り過ぎた
+    // 後も光り続け、時間を延ばしても最大の明るさに届かず暗くなることはない。
+    const uint16_t FADE_IN_MS   = 400;
     // 2026-10-09: 消え方を変更（本人希望「全てが光ってから全体がスッと消えるように」）。
     // 帯が通過したLEDは光ったまま残り、帯が端まで流れきって全部が光った後、全体が一緒に
     // FADE_OUT_MSかけて消える。以前は帯が通り過ぎたLEDから順に消えていた。
@@ -825,7 +825,12 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
                 if (elapsed < reach) continue;
 
                 uint16_t t_in  = elapsed - reach;
-                uint8_t  e_in  = (t_in >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t_in * 255) / FADE_IN_MS);
+                uint8_t  e_in  = 255;
+                if (t_in < FADE_IN_MS) {
+                    // smoothstep: x^2 * (3 - 2x)（x=0〜1を0〜255で表す）
+                    uint32_t x = (uint32_t)t_in * 255 / FADE_IN_MS;
+                    e_in       = (uint8_t)(x * x * (3 * 255 - 2 * x) / (255 * 255));
+                }
                 uint8_t  e_out = 255;
                 if (elapsed > ALL_LIT_MS) {
                     uint16_t t_out = elapsed - ALL_LIT_MS;
