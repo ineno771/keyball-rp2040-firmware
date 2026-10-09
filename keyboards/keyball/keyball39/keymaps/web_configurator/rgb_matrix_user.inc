@@ -771,7 +771,11 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
     const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
     const uint8_t  WAVE_WIDTH_V = 20;   // GESTURE_WAVEと同じ幅（上下方向）
     const uint8_t  WAVE_WIDTH_H = 28;   // GESTURE_WAVEと同じ幅（左右方向。座標範囲が広い分太くしてある）
-    const uint16_t FADE_IN_MS   = 250;  // 帯の範囲に入ってから最大の明るさになるまでの時間
+    // 帯の範囲に入ってから最大の明るさになるまでの時間。2026-10-09: 以前は250ms固定で、
+    // 速さを上げると帯が1つのLEDを通り過ぎる時間（最速で約120-150ms）の方が短くなり、
+    // 最大の明るさに届かず暗く見えていた（本人報告）。帯が流れきる時間の1/4にして、
+    // どの速さでも帯が通り過ぎる前に最大の明るさになるようにする（最遅900msで225ms＝ほぼ従来どおり）。
+    const uint16_t FADE_IN_MS   = (WAVE_MS / 4 < 40) ? 40 : WAVE_MS / 4;
     const uint16_t FADE_OUT_MS  = 600;  // 帯の範囲を外れてから消えきるまでの時間
 
     // LEDごとに「前フレームで帯の範囲に入っていたか」と、その状態が最後に切り替わった
