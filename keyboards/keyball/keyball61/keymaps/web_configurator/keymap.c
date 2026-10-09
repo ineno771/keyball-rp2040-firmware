@@ -881,10 +881,11 @@ void oledkit_render_info_user(void) {
 // なので、手描きより滑らかで、複数エフェクト分を同じ処理で共通化できる。
 // フレーム数はシーンごとに異なる（本人提供データの都合）ため、固定定数ではなく
 // 呼び出し側がKB_ANIM_*_FRAMESを渡す。
-static void render_seasonal_anim_oled(const uint8_t frames[][KB_ANIM_FRAME_BYTES], uint16_t frame_count) {
-    uint16_t idx = (uint16_t)((timer_read() / KB_ANIM_FRAME_MS) % frame_count);
+// 2026-10-09: データは圧縮して持つようになったため、kb_anim_frame()で1コマ元に戻してから転送する。
+static void render_seasonal_anim_oled(const kb_anim_t *anim) {
+    uint16_t idx = (uint16_t)((timer_read() / KB_ANIM_FRAME_MS) % anim->frames);
     oled_set_cursor(0, 0);
-    oled_write_raw_P((const char *)frames[idx], KB_ANIM_FRAME_BYTES);
+    oled_write_raw((const char *)kb_anim_frame(anim, idx), KB_ANIM_FRAME_BYTES);
 }
 
 
@@ -905,19 +906,19 @@ void oledkit_render_logo_user(void) {
     bool        handled     = false;
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
     switch (rgb_matrix_get_mode()) {
-        case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(anim_xmas, KB_ANIM_XMAS_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(anim_hallow, KB_ANIM_HALLOW_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(anim_easter, KB_ANIM_EASTER_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_TWINKLE: render_seasonal_anim_oled(anim_twinkle, KB_ANIM_TWINKLE_FRAMES); handled = true; break;
-        case RGB_MATRIX_GRADIENT_UP_DOWN: render_seasonal_anim_oled(anim_gradient, KB_ANIM_GRADIENT_FRAMES); handled = true; break;
-        case RGB_MATRIX_CYCLE_ALL: render_seasonal_anim_oled(anim_rainbow, KB_ANIM_RAINBOW_FRAMES); handled = true; break;
-        case RGB_MATRIX_BREATHING: render_seasonal_anim_oled(anim_breath, KB_ANIM_BREATH_FRAMES); handled = true; break;
-        case RGB_MATRIX_CYCLE_SPIRAL: render_seasonal_anim_oled(anim_swirl, KB_ANIM_SWIRL_FRAMES); handled = true; break;
+        case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
+        case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(&anim_hallow); handled = true; break;
+        case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(&anim_easter); handled = true; break;
+        case RGB_MATRIX_CUSTOM_TWINKLE: render_seasonal_anim_oled(&anim_twinkle); handled = true; break;
+        case RGB_MATRIX_GRADIENT_UP_DOWN: render_seasonal_anim_oled(&anim_gradient); handled = true; break;
+        case RGB_MATRIX_CYCLE_ALL: render_seasonal_anim_oled(&anim_rainbow); handled = true; break;
+        case RGB_MATRIX_BREATHING: render_seasonal_anim_oled(&anim_breath); handled = true; break;
+        case RGB_MATRIX_CYCLE_SPIRAL: render_seasonal_anim_oled(&anim_swirl); handled = true; break;
         // 万華鏡(kaleido)はWeb UIから選べる効果の中に直接対応するものが無いため、
         // 本人指示で「リアクティブ」(REACTIVE_KEYS)に割り当てている。
-        case RGB_MATRIX_CUSTOM_REACTIVE_KEYS: render_seasonal_anim_oled(anim_kaleido, KB_ANIM_KALEIDO_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_HEATMAP: render_seasonal_anim_oled(anim_heatmap, KB_ANIM_HEATMAP_FRAMES); handled = true; break;
-        case RGB_MATRIX_CUSTOM_RIPPLE: render_seasonal_anim_oled(anim_ripple, KB_ANIM_RIPPLE_FRAMES); handled = true; break;
+        case RGB_MATRIX_CUSTOM_REACTIVE_KEYS: render_seasonal_anim_oled(&anim_kaleido); handled = true; break;
+        case RGB_MATRIX_CUSTOM_HEATMAP: render_seasonal_anim_oled(&anim_heatmap); handled = true; break;
+        case RGB_MATRIX_CUSTOM_RIPPLE: render_seasonal_anim_oled(&anim_ripple); handled = true; break;
         default: break;
     }
 #endif
