@@ -739,10 +739,10 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             // してしまう。別レイヤーのジェスチャーの連続入力をOFFにしたら直った）。
             // そのためこの2キーだけは「連続入力」指定を無視し、常に単発扱いにする。
             bool              cont = ((m.continuous >> dir) & 1) && kc != SCRL_TO && kc != SCRL_MO;
-            if (kc) {
-                kb_fire_keycode(kc);
-                keyball_gesture_wave_trigger(dir, (uint8_t)gst_mode);  // 未割当方向(kc==0)では発動させない
-            }
+            if (kc) kb_fire_keycode(kc);
+            // 2026-10-09: 未割当の方向（なし）でもウェーブは出す（本人希望。ジェスチャーが
+            // 反応しているかを目で確認できるようにするため）。キーは送らない。
+            keyball_gesture_wave_trigger(dir, (uint8_t)gst_mode);
 
             if (cont) {
                 // 連続入力: しきい値分だけ引いて余りを持ち越す（クールダウンなし）。

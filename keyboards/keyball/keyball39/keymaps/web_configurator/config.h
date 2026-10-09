@@ -83,7 +83,7 @@
 
 // 最大輝度（消費電力抑制）
 #undef RGBLIGHT_LIMIT_VAL
-#define RGBLIGHT_LIMIT_VAL 150
+#define RGBLIGHT_LIMIT_VAL 200
 
 // ===== RGB_MATRIX（波紋演出のためRGBLIGHTから移行中。現在はLED物理位置の実測用暫定ビルド） =====
 // LED総数を実際のハードウェア構成に合わせて上書き（RGBLIGHTと同じく右22 + 左24 = 46個）
@@ -111,5 +111,7 @@
 // kb_led_config（EEPROM保存の独自管理領域）から反映するため、ここでは指定しない。
 // kb_led_configが未初期化(0xFF)の場合はkb_settings.cの既定値（呼吸相当のeffect_id=2）
 // が使われる。
-// 最大輝度（消費電力抑制、RGBLIGHT側と揃える）
-#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
+// 最大輝度（消費電力抑制）。2026-10-09: Keyball61でUSBの電源が落ちる（ケーブルのランプが
+// 消える）症状が出たため、LED数に応じて機種ごとに設定（本人指定: 39=200、44=170、61=140。
+// Keyball+は150のまま）。ジェスチャーウェーブの明るさにもこの上限をかけている。
+#define RGB_MATRIX_MAXIMUM_BRIGHTNESS 200

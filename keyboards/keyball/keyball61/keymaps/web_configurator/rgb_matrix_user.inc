@@ -691,7 +691,7 @@ static void gesture_wave_render_sharp(uint8_t led_min, uint8_t led_max, bool ove
                     // ピークとしてスケールする（2026-09-29〜。以前は常に255固定
                     // だったが、本人希望で明るさも個別調整できるようにした）。
                     uint8_t bright = (uint8_t)(255 - ((uint32_t)d * 255 / WAVE_WIDTH));
-                    uint8_t v      = (uint8_t)(((uint16_t)bright * keyball.gesture_wave_val) / 255);
+                    uint8_t v      = (uint8_t)(((uint32_t)bright * keyball.gesture_wave_val * RGB_MATRIX_MAXIMUM_BRIGHTNESS / 255) / 255);
                     if (v > out.v) {
                         // 色相・彩度もジェスチャー専用の設定値を使う（本人希望、2026-09-29〜。
                         // 以前は常にrgb_matrix_config.hsv＝その時点で表示中の通常LED/
@@ -845,7 +845,7 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
             if (env > 0) {
                 out.h = keyball.gesture_wave_hue;
                 out.s = keyball.gesture_wave_sat;
-                out.v = (uint8_t)(((uint16_t)env * keyball.gesture_wave_val) / 255);
+                out.v = (uint8_t)(((uint32_t)env * keyball.gesture_wave_val * RGB_MATRIX_MAXIMUM_BRIGHTNESS / 255) / 255);
             }
         }
         RGB rgb = rgb_matrix_hsv_to_rgb(out);
