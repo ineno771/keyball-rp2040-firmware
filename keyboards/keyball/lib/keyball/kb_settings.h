@@ -96,11 +96,24 @@ uint8_t kb_gesture_th_v_get(void);
 void    kb_gesture_th_v_set(uint8_t v);
 
 // ── 複数ジェスチャーモード（2026-09-09〜）─────────────────────────
-// 4つの独立したジェスチャーモードを持つ。各モードは上下左右の割当キーと、
+// 6つの独立したジェスチャーモードを持つ（2026-10-09に4→6へ増設、本人希望）。各モードは上下左右の割当キーと、
 // 方向ごとの「連続入力」ON/OFF、連動レイヤー（0-7 / KB_LAYER_NONEでなし）を持つ。
-// モード選択はGST_HOLD〜4キー（押している間だけ優先）またはレイヤー連動で行う
+// モード選択はGST_HOLD〜6キー（押している間だけ優先）またはレイヤー連動で行う
 // （選択ロジック自体はkeymap.c側の責務。ここは設定の保存・取得のみ）。
-#define KB_GESTURE_MODE_COUNT 4
+#define KB_GESTURE_MODE_COUNT 6
+// モード1〜4（0-3）の設定は従来の番地のまま（既存利用者の設定をそのまま引き継ぐため）、
+// 2026-10-09に追加したモード5・6（4-5）は空き領域0x0ACE-0x0AEDにまとめて置く:
+//   0x0ACE-0x0AE1 モード表（2モード×10バイト）
+//   0x0AE2-0x0AE3 ウェーブの速さ  0x0AE4-0x0AE5 ウェーブの見た目
+//   0x0AE6-0x0AEB ウェーブの色（2モード×3バイト）  0x0AEC-0x0AED 色の保存済み目印
+// 全機種共通の番地（キーマップ領域との衝突は冒頭の_Static_assertで検査済み、EEPROMは
+// 0x0000-0x0FFFの4096バイト）。次にここへ設定を追加する場合は0x0AEEから。
+#define KB_GESTURE_MODE_LEGACY_COUNT        4
+#define KB_GESTURE_MODE_EXT_TABLE_EEPROM    0x0ACE
+#define KB_GESTURE_WAVE_SPEED_EXT_EEPROM    0x0AE2
+#define KB_GESTURE_WAVE_STYLE_EXT_EEPROM    0x0AE4
+#define KB_GESTURE_WAVE_COLOR_EXT_EEPROM    0x0AE6
+#define KB_GESTURE_WAVE_COLOR_MAGIC_EXT_EEPROM 0x0AEC
 
 typedef struct {
     uint16_t key[4];     // 割当キー [0]上 [1]下 [2]左 [3]右（0=未設定）
@@ -118,7 +131,7 @@ typedef struct {
 #define KB_GESTURE_MODE_TABLE_EEPROM 0x0A19
 #define KB_GESTURE_MODE_ENTRY_SIZE   10
 
-// モードN（0-3）の設定を取得・変更する
+// モードN（0-5）の設定を取得・変更する
 kb_gesture_mode_t kb_gesture_mode_get(uint8_t mode);
 void              kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg);
 

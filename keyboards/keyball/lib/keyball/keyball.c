@@ -601,7 +601,7 @@ static gesture_wave_rpc_t g_gesture_wave_pending_payload;
 void keyball_gesture_wave_trigger(uint8_t direction, uint8_t mode) {
     if (!kb_gesture_wave_enable_get()) return;  // 機能自体がOFFなら何もしない
     if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;  // 呼び出し元(keymap.c)のgst_active_modeは
-                                                   // 常に0-3のはずだが念のため防御的にクランプ
+                                                   // 常に0-5のはずだが念のため防御的にクランプ
 
     // 連続入力などで短時間に何度も呼ばれても、前のウェーブがまだ表示中なら次を
     // 発動させない（本人希望：重ねて発動させず、前のウェーブが終わってから次を

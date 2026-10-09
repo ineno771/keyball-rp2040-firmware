@@ -71,9 +71,9 @@ static void kb_fire_keycode(uint16_t kc) {
 
 #ifdef GESTURE_ENABLE
 // 複数ジェスチャーモード: トラックボールの移動を累積し方向で判定して送出する。
-// モードは4つ(0-3)あり、GST_HOLD〜4キーを押している間はそのモードを一時的に優先、
+// モードは6つ(0-5)あり、GST_HOLD〜6キーを押している間はそのモードを一時的に優先、
 // 離すと現在のレイヤーに連動するモード（なければ無効）に戻る。
-static int8_t   g_gst_manual_mode = -1;  // GST_HOLD〜4を押している間の一時モード。-1=なし
+static int8_t   g_gst_manual_mode = -1;  // GST_HOLD〜6を押している間の一時モード。-1=なし
 static int8_t   g_gst_layer_mode  = -1;  // 現レイヤーに連動するモード。-1=連動なし
 static int16_t  g_gesture_acc_x   = 0;
 static int16_t  g_gesture_acc_y   = 0;
@@ -342,8 +342,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 // マクロキー再生（QK_MACRO_0〜QK_MACRO_15 = 0x7700〜0x770F）
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 #ifdef GESTURE_ENABLE
-    if (keycode == GST_HOLD || keycode == GST_HOLD2 || keycode == GST_HOLD3 || keycode == GST_HOLD4) {
-        int8_t idx = (keycode == GST_HOLD) ? 0 : (keycode == GST_HOLD2) ? 1 : (keycode == GST_HOLD3) ? 2 : 3;
+    if (keycode == GST_HOLD || keycode == GST_HOLD2 || keycode == GST_HOLD3 || keycode == GST_HOLD4 ||
+        keycode == GST_HOLD5 || keycode == GST_HOLD6) {
+        int8_t idx = (keycode == GST_HOLD) ? 0 : (keycode == GST_HOLD2) ? 1 : (keycode == GST_HOLD3) ? 2
+                   : (keycode == GST_HOLD4) ? 3 : (keycode == GST_HOLD5) ? 4 : 5;
         if (record->event.pressed) {
             g_gst_manual_mode = idx;
         } else if (g_gst_manual_mode == idx) {

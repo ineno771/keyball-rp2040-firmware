@@ -142,7 +142,33 @@ static const kb_gesture_mode_t kb_gesture_mode_defaults[KB_GESTURE_MODE_COUNT] =
     {.key = {KC_UP, KC_DOWN, KC_LEFT, KC_RIGHT}, .continuous = 0x0F},
     // ジェスチャー4: 上=Enter、下=Backspace、左=かな、右=英数
     {.key = {KC_ENTER, KC_BACKSPACE, KC_LNG1, KC_LNG2}, .continuous = 0},
+    // ジェスチャー5・6（2026-10-09追加）: 既定の割り当てなし
+    {.key = {0, 0, 0, 0}, .continuous = 0},
+    {.key = {0, 0, 0, 0}, .continuous = 0},
 };
+
+// モードごとの保存先。モード1〜4は従来の番地、5・6は追加領域（kb_settings.h参照）。
+static uint16_t gesture_mode_addr(uint8_t i) {
+    return i < KB_GESTURE_MODE_LEGACY_COUNT
+               ? (uint16_t)(KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)i * KB_GESTURE_MODE_ENTRY_SIZE)
+               : (uint16_t)(KB_GESTURE_MODE_EXT_TABLE_EEPROM + (uint16_t)(i - KB_GESTURE_MODE_LEGACY_COUNT) * KB_GESTURE_MODE_ENTRY_SIZE);
+}
+static uint16_t gesture_wave_speed_addr(uint8_t i) {
+    return i < KB_GESTURE_MODE_LEGACY_COUNT ? (uint16_t)(KB_GESTURE_WAVE_SPEED_EEPROM + i)
+                                            : (uint16_t)(KB_GESTURE_WAVE_SPEED_EXT_EEPROM + i - KB_GESTURE_MODE_LEGACY_COUNT);
+}
+static uint16_t gesture_wave_style_addr(uint8_t i) {
+    return i < KB_GESTURE_MODE_LEGACY_COUNT ? (uint16_t)(KB_GESTURE_WAVE_STYLE_EEPROM + i)
+                                            : (uint16_t)(KB_GESTURE_WAVE_STYLE_EXT_EEPROM + i - KB_GESTURE_MODE_LEGACY_COUNT);
+}
+static uint16_t gesture_wave_color_addr(uint8_t i) {
+    return i < KB_GESTURE_MODE_LEGACY_COUNT ? (uint16_t)(KB_GESTURE_WAVE_COLOR_EEPROM + (uint16_t)i * 3)
+                                            : (uint16_t)(KB_GESTURE_WAVE_COLOR_EXT_EEPROM + (uint16_t)(i - KB_GESTURE_MODE_LEGACY_COUNT) * 3);
+}
+static uint16_t gesture_wave_color_magic_addr(uint8_t i) {
+    return i < KB_GESTURE_MODE_LEGACY_COUNT ? (uint16_t)(KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM + i)
+                                            : (uint16_t)(KB_GESTURE_WAVE_COLOR_MAGIC_EXT_EEPROM + i - KB_GESTURE_MODE_LEGACY_COUNT);
+}
 
 static kb_gesture_mode_t g_gesture_modes[KB_GESTURE_MODE_COUNT];
 static bool              g_gesture_modes_loaded = false;
@@ -150,7 +176,7 @@ static bool              g_gesture_modes_loaded = false;
 static void kb_gesture_modes_ensure_loaded(void) {
     if (g_gesture_modes_loaded) return;
     for (uint8_t i = 0; i < KB_GESTURE_MODE_COUNT; i++) {
-        uint16_t addr = KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)i * KB_GESTURE_MODE_ENTRY_SIZE;
+        uint16_t addr = gesture_mode_addr(i);
         uint8_t  buf[KB_GESTURE_MODE_ENTRY_SIZE];
         eeprom_read_block(buf, (const void *)(uintptr_t)addr, KB_GESTURE_MODE_ENTRY_SIZE);
 
@@ -197,7 +223,7 @@ void kb_gesture_mode_set(uint8_t mode, const kb_gesture_mode_t *cfg) {
         (uint8_t)(cfg->key[3] >> 8), (uint8_t)cfg->key[3],
         cfg->continuous, cfg->layer,
     };
-    uint16_t addr = KB_GESTURE_MODE_TABLE_EEPROM + (uint16_t)mode * KB_GESTURE_MODE_ENTRY_SIZE;
+    uint16_t addr = gesture_mode_addr(mode);
     eeprom_write_block(buf, (void *)(uintptr_t)addr, KB_GESTURE_MODE_ENTRY_SIZE);
 }
 
@@ -210,7 +236,7 @@ static bool    g_gesture_wave_speed_loaded = false;
 static void gesture_wave_speed_ensure_loaded(void) {
     if (g_gesture_wave_speed_loaded) return;
     for (uint8_t i = 0; i < KB_GESTURE_MODE_COUNT; i++) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_SPEED_EEPROM + i));
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)gesture_wave_speed_addr(i));
         g_gesture_wave_speed[i] = (v >= KB_GESTURE_WAVE_SPEED_MIN && v <= KB_GESTURE_WAVE_SPEED_MAX) ? v : KB_GESTURE_WAVE_SPEED_DEFAULT;
     }
     g_gesture_wave_speed_loaded = true;
@@ -227,7 +253,7 @@ void kb_gesture_wave_speed_set(uint8_t mode, uint8_t v) {
     if (mode >= KB_GESTURE_MODE_COUNT) return;
     v                             = (v >= KB_GESTURE_WAVE_SPEED_MIN && v <= KB_GESTURE_WAVE_SPEED_MAX) ? v : KB_GESTURE_WAVE_SPEED_DEFAULT;
     g_gesture_wave_speed[mode]    = v;
-    eeprom_write_byte((uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_SPEED_EEPROM + mode), v);
+    eeprom_write_byte((uint8_t *)(uintptr_t)gesture_wave_speed_addr(mode), v);
 }
 
 // ── ジェスチャー連動LEDウェーブ機能の有効/無効（既定ON。理由はkb_settings.h参照）──
@@ -248,12 +274,12 @@ void kb_gesture_wave_enable_set(bool v) {
 
 // ── ジェスチャー連動LEDウェーブの見た目（モードごと。既定0=シャープ。未書込み時
 // 0x00と一致するので特別な反転パターンは不要）───────────────────
-static int8_t g_gesture_wave_style[KB_GESTURE_MODE_COUNT] = {-1, -1, -1, -1};  // -1=未確認
+static int8_t g_gesture_wave_style[KB_GESTURE_MODE_COUNT] = {-1, -1, -1, -1, -1, -1};  // -1=未確認
 
 uint8_t kb_gesture_wave_style_get(uint8_t mode) {
     if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;
     if (g_gesture_wave_style[mode] < 0) {
-        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_STYLE_EEPROM + mode));
+        uint8_t v = eeprom_read_byte((const uint8_t *)(uintptr_t)gesture_wave_style_addr(mode));
         g_gesture_wave_style[mode] = (v == KB_GESTURE_WAVE_STYLE_BREATH) ? KB_GESTURE_WAVE_STYLE_BREATH : KB_GESTURE_WAVE_STYLE_SHARP;
     }
     return (uint8_t)g_gesture_wave_style[mode];
@@ -263,7 +289,7 @@ void kb_gesture_wave_style_set(uint8_t mode, uint8_t v) {
     if (mode >= KB_GESTURE_MODE_COUNT) return;
     v                          = (v == KB_GESTURE_WAVE_STYLE_BREATH) ? KB_GESTURE_WAVE_STYLE_BREATH : KB_GESTURE_WAVE_STYLE_SHARP;
     g_gesture_wave_style[mode] = v;
-    eeprom_write_byte((uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_STYLE_EEPROM + mode), v);
+    eeprom_write_byte((uint8_t *)(uintptr_t)gesture_wave_style_addr(mode), v);
 }
 
 // ── ジェスチャー連動LEDウェーブ専用の色（モードごと。マジックバイトで保存済みか
@@ -276,10 +302,10 @@ static bool                    g_gesture_wave_color_loaded[KB_GESTURE_MODE_COUNT
 kb_gesture_wave_color_t kb_gesture_wave_color_get(uint8_t mode) {
     if (mode >= KB_GESTURE_MODE_COUNT) mode = 0;
     if (!g_gesture_wave_color_loaded[mode]) {
-        uint8_t magic = eeprom_read_byte((const uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM + mode));
+        uint8_t magic = eeprom_read_byte((const uint8_t *)(uintptr_t)gesture_wave_color_magic_addr(mode));
         if (magic == KB_GESTURE_WAVE_COLOR_MAGIC_VALUE) {
             uint8_t buf[3];
-            eeprom_read_block(buf, (const void *)(uintptr_t)(KB_GESTURE_WAVE_COLOR_EEPROM + (uint16_t)mode * 3), sizeof(buf));
+            eeprom_read_block(buf, (const void *)(uintptr_t)gesture_wave_color_addr(mode), sizeof(buf));
             g_gesture_wave_color[mode] = (kb_gesture_wave_color_t){.hue = buf[0], .sat = buf[1], .val = buf[2]};
         } else {
             g_gesture_wave_color[mode] = (kb_gesture_wave_color_t){
@@ -295,8 +321,8 @@ void kb_gesture_wave_color_set(uint8_t mode, const kb_gesture_wave_color_t *c) {
     g_gesture_wave_color[mode]        = *c;
     g_gesture_wave_color_loaded[mode] = true;
     uint8_t buf[3]                    = {c->hue, c->sat, c->val};
-    eeprom_write_block(buf, (void *)(uintptr_t)(KB_GESTURE_WAVE_COLOR_EEPROM + (uint16_t)mode * 3), sizeof(buf));
-    eeprom_write_byte((uint8_t *)(uintptr_t)(KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM + mode), KB_GESTURE_WAVE_COLOR_MAGIC_VALUE);
+    eeprom_write_block(buf, (void *)(uintptr_t)gesture_wave_color_addr(mode), sizeof(buf));
+    eeprom_write_byte((uint8_t *)(uintptr_t)gesture_wave_color_magic_addr(mode), KB_GESTURE_WAVE_COLOR_MAGIC_VALUE);
 }
 #endif
 

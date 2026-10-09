@@ -40,8 +40,8 @@
 #define KB_HID_CMD_SET_LAYER_LED        0x1D  // 指定レイヤーのLED設定変更
 #define KB_HID_CMD_GET_SCROLL_INERTIA   0x1E  // 慣性スクロール設定取得
 #define KB_HID_CMD_SET_SCROLL_INERTIA   0x1F  // 慣性スクロール設定変更
-#define KB_HID_CMD_GET_GESTURE_MODE      0x20  // 指定ジェスチャーモード(0-3)の設定取得
-#define KB_HID_CMD_SET_GESTURE_MODE      0x21  // 指定ジェスチャーモード(0-3)の設定変更
+#define KB_HID_CMD_GET_GESTURE_MODE      0x20  // 指定ジェスチャーモード(0-5)の設定取得
+#define KB_HID_CMD_SET_GESTURE_MODE      0x21  // 指定ジェスチャーモード(0-5)の設定変更
 #define KB_HID_CMD_GET_GESTURE_THRESHOLD 0x22  // ジェスチャー発動しきい値（全モード共通）取得
 #define KB_HID_CMD_SET_GESTURE_THRESHOLD 0x23  // ジェスチャー発動しきい値（全モード共通）変更
 #define KB_HID_CMD_GET_GESTURE_WAVE_SPEED 0x24  // ジェスチャー連動LEDウェーブの速さ取得
