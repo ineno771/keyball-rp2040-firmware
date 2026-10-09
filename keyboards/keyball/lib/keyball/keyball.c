@@ -702,6 +702,19 @@ static uint16_t g_boot_anim_start = 0;
 static uint8_t  g_boot_saved_mode = RGB_MATRIX_SOLID_COLOR;
 static bool     g_boot_negotiated = false;
 
+// LEDのモードを切り替える。QMKのrgb_matrix_mode_noeeprom()はLEDがオフの時は何もしない
+// （quantum/rgb_matrix/rgb_matrix.c）ため、オフの時はモードの値だけを直接書き換える。
+// 反対側への合図はこのモードの値の同期（PUT_RGB_MATRIX、100msごとの強制同期あり）で
+// 伝わるので、LEDがオフでもスレーブのOLEDの起動演出が動くようにするため（2026-10-09、
+// LEDオフの状態でスレーブのロゴ演出が出なかった）。LEDはオフのままなので光らない。
+static void boot_set_mode(uint8_t mode) {
+    if (rgb_matrix_is_enabled()) {
+        rgb_matrix_mode_noeeprom(mode);
+    } else {
+        rgb_matrix_config.mode = mode;
+    }
+}
+
 static bool boot_is_boot_mode(uint8_t mode) {
     return mode == RGB_MATRIX_CUSTOM_BOOT_WAIT || mode == RGB_MATRIX_CUSTOM_BOOT_SPREAD;
 }
@@ -711,13 +724,13 @@ static void keyball_boot_init(void) {
     uint8_t mode      = rgb_matrix_get_mode();
     g_boot_saved_mode = boot_is_boot_mode(mode) ? RGB_MATRIX_SOLID_COLOR : mode;
     g_boot_phase      = KB_BOOT_WAIT;
-    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_BOOT_WAIT);  // オン/オフの状態はそのまま
+    boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_WAIT);  // オン/オフの状態はそのまま
 }
 
 static void boot_start_anim(void) {
     g_boot_phase      = KB_BOOT_ANIM;
     g_boot_anim_start = timer_read();
-    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_BOOT_SPREAD);
+    boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_SPREAD);
 }
 
 static void apply_layer_led_now(uint8_t hl);
@@ -734,7 +747,7 @@ static void keyball_boot_task(void) {
             apply_layer_led_now(get_highest_layer(layer_state | default_layer_state));
             // LEDオフ設定の時はモードが起動演出のまま残るので、元のモードへ戻す
             // （反対側のOLEDがモードを見て演出を終えるため）
-            if (boot_is_boot_mode(rgb_matrix_get_mode())) rgb_matrix_mode_noeeprom(g_boot_saved_mode);
+            if (boot_is_boot_mode(rgb_matrix_get_mode())) boot_set_mode(g_boot_saved_mode);
         }
     } else {
         // スレーブはマスターから同期されたLEDモードで段階を判断する
