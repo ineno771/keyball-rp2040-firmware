@@ -11,9 +11,32 @@
 | **本番** | https://keyball-link.shiroganelab.com （keyball-configuratorの`main`ブランチから`npm run deploy`。一般公開） |
 | **開発** | https://rp2040.keyball-link.pages.dev （`rp2040`ブランチから`npm run deploy`。本人の実機確認用・非公開） |
 | **AVR版** | .hexのファームウェア（Keyball39/44/61/+、通常版とLED版）。本番で配布中 |
-| **RP2040版** | .uf2のファームウェア（Keyball39/+、keyball-rp2040-firmware）。本番では`RP2040_PUBLIC_RELEASE=false`で非表示、開発からのみ書き込める |
+| **RP2040版** | .uf2のファームウェア（Keyball39/44/61/+、keyball-rp2040-firmware）。2026-10-09から本番でも公開（`RP2040_PUBLIC_RELEASE=true`） |
 
 報告例: 「RP2040版 v0.4.4を開発に反映（本番には未掲載）」。GitHubへのpushは本番・開発のどちらにも反映されないバックアップなので、別物として書く。
+
+## ★最新状況（2026-10-09時点。別デバイスで再開する時はまずここを読む）
+
+### いまの状態
+- **本番**（https://keyball-link.shiroganelab.com）でRP2040版を公開中（2026-10-09〜）。公開スイッチ`RP2040_PUBLIC_RELEASE`はmain・rp2040ブランチとも`true`。mainとrp2040は同じ内容で、都度`git merge --no-ff main`で同期する。
+- **最新バージョン**: RP2040版 **v0.4.28**（39/44/61/+）、AVR版 **v1.4.2**（39/44/61）・**v1.1.1**（Keyball+）。
+- **反映の手順**（keyball-configurator）: ①ファームを編集したら`npm run update-firmware`（全AVR 8本＋RP2040 4本をビルドし`public/firmware`へ配置・整合性チェック）②mainでコミット ③`git checkout rp2040 && git merge --no-ff main` → `npm run deploy`で**開発**へ ④本人の実機確認後、mainで`npm run deploy`して**本番**へ ⑤`git push`（本番・開発どちらにも反映されないバックアップ。pushは本人の指示があった時だけ）。
+- **RP2040ファームの編集場所**は`~/keyball-rp2040-firmware`。ビルドは`npm run update-firmware`が`~/qmk_firmware-keyball-rp2040`へ同期してから行う。バージョンは`keyboards/keyball/lib/keyball/kb_version.h`と、Keyball Linkの`src/lib/firmwareFeatures.ts`の`LATEST_FW_VERSION_RP2040`を必ず両方上げる。
+
+### 必ず知っておくこと（重要な仕様・落とし穴）
+1. **左右判定が物理的な左右と逆**: QMKの#22775（2024-01）で`SPLIT_HAND_MATRIX_GRID`の既定が「交差点が短絡=左」→「短絡=右」に反転した。Keyball基板は**左手側**にrow2-col5（F6,B5）を短絡する左手判定ジャンパーを付ける設計（KiCadで本人確認済み）なので、今のQMKでは**物理的な左手が「右」と判定される**（AVR版・RP2040版とも、全機種）。正規Yowkeesファームは旧QMK前提。Keyball Linkの配列定義（`src/layouts/*.ts`の「row0-3=物理右」）や、下記の上書き・補正はすべてこの逆転を前提にしている。**左右がらみの修正の前に必ず思い出すこと**（知らずに修正してv0.4.12で空振りした）。
+2. **RP2040版の「ボール側＝左」上書き**: 39/44/61/+の`keymaps/web_configurator/keymap.c`は`is_keyboard_left()`を上書きし、ボール検出後は「ボールがある基板＝LED表の前半担当（左）」と答える。LED数がボール側と反対側で違い、`RGB_MATRIX_SPLIT`はビルド時固定のため。ボール基板とボール無し基板のLED数は固定で、左手判定ジャンパーは「左手として使う基板」に付く（左手ボールならボール基板に付く）。左手ボール時はmatrix_coの行0-3⇔4-7入れ替えと、ジェスチャーウェーブの左右反転（`kb_ball_on_physical_left()`）を行う。LED座標表は39/44/+が右手ボール、61が左手ボールの実機で作ってある。
+3. **LEDモードの同期を左右の合図に使う時の落とし穴**（起動演出で2回ハマった）: (a) QMKの`rgb_matrix_mode_noeeprom()`はLEDオフ時は何もしない → オフでも合図を送るなら`rgb_matrix_config.mode`を直接書く（`keyball.c`の`boot_set_mode`）。(b) スレーブは、マスターから何も届いていない間も受信用共有メモリ（0）を毎スキャン`rgb_matrix_config`に写すので、起動直後のスレーブではモードが0になる → 0は「未受信」として扱う。
+4. **ハーフ間の新しい定期RPCは追加しない**（追加したらトラックボールが止まったことがある）。左右の合図は既存のRGB_MATRIX同期（100msごとの強制同期あり）などに乗せる。
+5. **EEPROM（RP2040は4096バイト）**: 独自設定は全機種共通の番地（`lib/keyball/kb_settings.h`）。0x0800〜0x0AEDまで使用済み、**次に追加するなら0x0AEEから**。キーマップ領域との衝突は`_Static_assert`で検査している。
+
+### 保留中のタスク（本人判断済み）
+- **左右判定の根本修正（B）**: `SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT`を入れて判定を物理と一致させる。本人は「気持ち悪いので直したい」「自分でビルドする人が混乱しそう」との意向。**条件: 利用者に一切混乱が出ないこと**（更新しても何も変わらない状態）。必要な作業: 全機種・AVR/RP2040のconfig.h、逆転前提の補正（Keyball Link配列定義・上書き・LED/ウェーブ補正）の外し直し、更新後初回起動での保存済みキーマップの行0-3⇔4-7自動入れ替え、書き出しJSONの新旧判別と自動変換、片側だけ更新すると壊れる旨の念押し、README/CHANGELOGへの経緯記載。**開発で全機種・全ボール位置をしっかり確認してから本番へ**。
+- **ボール無し・両側ボール構成**: 上記の「ボール側＝左」上書きが左右とも同じ値を返すため正しく動かない恐れがある。**Bで左右判定が正確になってから対処**（本人指示）。
+- **Keyball61の電源が落ちる（USBケーブルのランプが消える）症状**: LED電流が原因と見てLED最大輝度を機種別に下げた（39=150、44=140、61=130、+=150。ジェスチャーウェーブにも同じ上限）。**様子見中**。再発したら本人から報告が来る。複数機器をバスパワーのハブにつなぐと起きやすい旨は説明済み。
+- 書き込み時のChromeの「Failed to perform Safe Browsing check.」「Aborted due to security policy.」は、ブートローダーが先に再起動してドライブが消えるためと判断。データ送信後のエラーでドライブが消えていれば「書き込み完了」と表示する対策を入れ済み（`src/lib/uf2flash.ts`、本人確認OK）。
+
+---
 
 ## 0. プロジェクト概要
 - **何のプロジェクトか**: SparkFun Pro Micro RP2040を使った、Keyballシリーズ向けの大容量フラッシュ版ファームウェア。まずKeyball39から着手。既存のATmega32u4版（keyball-link-firmware）はフラッシュ32KBの制約で「LED版」「通常版（マクロ・ジェスチャー）」を分けてビルドしていたが、RP2040の16MBフラッシュで全機能を1つに統合するのが目的。
@@ -21,7 +44,7 @@
 - **GitHub**: https://github.com/ineno771/keyball-rp2040-firmware （個人アカウント配下・Public。keyball-plus-firmwareと同様）
 - **ベースにした既存プロジェクト**: `~/keyball-link-firmware`（GitHub: Yowkees/keyball-link-firmware）のKeyball39定義。これがKeyball Link（Web版設定ツール）から現在実際に書き込まれているファームウェア。
 - **ハードウェア方針**: 基板は無改修。既存Keyball39の12ピンPro Microソケット（コンスルー接続）に、SparkFun Pro RP2040をそのまま挿す。分割両側ともRP2040化。
-- **現在のファームバージョン**: 0.2.0（`keyboards/keyball/lib/keyball/kb_version.h`。AVR版とは別系統の番号）
+- **現在のファームバージョン**: 0.4.28（2026-10-09。`keyboards/keyball/lib/keyball/kb_version.h`。AVR版とは別系統の番号）
 
 ---
 
@@ -364,6 +387,15 @@
 - **【重要・判明】左右判定が物理と逆**: QMKの#22775（2024-01）で`SPLIT_HAND_MATRIX_GRID`の既定が「短絡=左」→「短絡=右」に反転。Keyball基板は左手側にrow2-col5（F6,B5）を短絡するジャンパーを付けるため、今のQMKでは**物理的な左手が「右」と判定される**（全機種・AVR版も同じ。正規Yowkeesファームは旧QMK前提）。Keyball Linkの配列定義や上記の補正はすべてこの逆転を前提にしている。左右がらみの修正前に必ず意識すること。
 - **保留（本人判断）**: ①`SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT`で根本修正（B）。公開後に、保存済みキーマップの自動移行などで利用者に一切混乱が出ない形にし、開発で十分確認してから公開。②ボールなし・両側ボール構成（上書きが左右とも同じ値を返す）はBの後に対処。
 - **2026-10-09 実機確認**: 39/44/61/+の左右ボールとも、キー・ボール・LED・ジェスチャーウェーブOK。同日、本番（Keyball Link）でRP2040版を公開。
+
+### 2026-10-09（続き）: v0.4.17〜v0.4.28、本番公開（実機確認OK）
+- **v0.4.17 OLEDアニメーションの圧縮**: 11種類のアニメ（約690KB）を「前のコマとのXOR差分」か「単体」の小さい方＋PackBitsで圧縮し、30コマごとにキーフレーム。UF2が約1.53MB→約0.69MB。元データ`lib/oledkit/frames/`は残し、`lib/oledkit/tools/pack_anim_frames.py`で`frames_packed/`を生成（元データを差し替えたら必ず再実行）。`kb_anim_frame()`（`anim_frames.c`）で1コマずつ元に戻す。Macでのテストで全コマ元データと一致を確認済み。
+- **v0.4.18 ジェスチャーを4→6モード**: モード5・6の設定は0x0ACE-0x0AED（1〜4は従来番地のまま＝既存設定を引き継ぐ）。切替キーGST_HOLD5/6＝QK_KB_22/23（0x7E16/0x7E17）。5・6の既定割り当てはなし。Keyball Linkはファームv0.4.18以上なら6モード、それ未満は4モード表示（`gestureModeCountFor()`）。
+- **v0.4.19〜v0.4.23 起動演出**: 起動直後は左右ともLED・OLEDを消して待ち（`BOOT_WAIT`）、左右の情報交換（GET_INFO）が済んだらマスターがLEDモードを`BOOT_SPREAD`（中央から外へ広がる）に切り替え、既存のRGB_MATRIX同期で左右同時に始める。スレーブのOLEDはドットが四方から集まってKeyballロゴになる（`lib/oledkit/oledkit.c`の`render_boot_anim`、ロゴの点は`font[]`の0x80〜0xAFから読む）。マスターは同時に情報表示を開始。約1.5秒で元のLED設定へ戻す。反対側が4秒つながらなければ単独で開始。LEDオフ設定ならOLEDだけ。v0.4.11の起動時LED再同期（led_resync）は、演出後に遅れてつながった時だけ使う。v0.4.22/23は上記「落とし穴(a)(b)」の修正。
+- **v0.4.20 電源直後のOLEDのでたらめな表示（ジャミング）を解消**: QMKの`oled_init()`は最後に表示ONにするが、最初の描画までOLEDのメモリに電源投入時のゴミが残っていた。`oledkit.c`の`oled_init_user()`（表示ONより前に呼ばれる）でOLEDメモリを0で埋める。
+- **v0.4.20 割り当て「なし」の方向でもジェスチャーウェーブを出す**（キーは送らない。動作確認用、本人希望）。
+- **v0.4.20〜21 LED最大輝度を機種別に**（39=150、44=140、61=130、+=150）。**v0.4.24**でウェーブの明るさにも通常LEDと同じ「上限を超えた分を切り捨て」をかけた（v0.4.20〜23は比例縮小で通常LEDより暗かった）。
+- **v0.4.25〜28 ブリージングのウェーブ**: 帯が通ったLEDは光ったまま残り、端まで流れて全部光った後、全体が一緒に0.4秒で消える。点灯は0.25秒・smoothstep曲線（出だしと最後がゆっくり）。ブリージングだけ最速を100msに（シャープは200〜900msのまま）。`keyball.c`の`gesture_wave_duration_ms()`は`rgb_matrix_user.inc`の時間配分と必ず揃えること。
 
 ---
 
