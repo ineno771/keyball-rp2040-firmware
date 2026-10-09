@@ -1231,12 +1231,14 @@ static uint16_t gesture_wave_duration_ms(void) {
     // のをやめた）。
     uint16_t travel_ms = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
     if (keyball.gesture_wave_style == KB_GESTURE_WAVE_STYLE_BREATH) {
-        // BREATHは帯が通り過ぎた後もLEDごとに残像フェードが続くため、その猶予分
-        // だけスロットの寿命を延ばす。rgb_matrix_user.incのTRACKBALL_BREATH()の
-        // FADE_OUT_MSと必ず同じ値にすること（ズレると、猶予が足りずフェード完了前に
-        // レイヤー連動LED側へ表示が戻ってしまう、または逆に無駄に長く居座る）。
-        const uint16_t FADE_OUT_MS = 600;
-        return travel_ms + FADE_OUT_MS;
+        // BREATHは帯が流れきった後、最後のLEDが明るくなりきるのを待ち（FADE_IN_MS）、
+        // そこから全体が一緒に消える（FADE_OUT_MS）ため、その分だけスロットの寿命を延ばす。
+        // rgb_matrix_user.incのgesture_wave_render_breath()のFADE_IN_MS/FADE_OUT_MSと必ず
+        // 同じ式にすること（ズレると、消えきる前にレイヤー連動LED側へ表示が戻ってしまう、
+        // または逆に無駄に長く居座る）。2026-10-09: 消え方の変更に合わせて更新。
+        const uint16_t FADE_IN_MS  = (travel_ms / 4 < 40) ? 40 : travel_ms / 4;
+        const uint16_t FADE_OUT_MS = 400;
+        return travel_ms + FADE_IN_MS + FADE_OUT_MS;
     }
     return travel_ms;
 }

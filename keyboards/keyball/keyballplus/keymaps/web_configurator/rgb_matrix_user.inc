@@ -779,15 +779,13 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
     // 最大の明るさに届かず暗く見えていた（本人報告）。帯が流れきる時間の1/4にして、
     // どの速さでも帯が通り過ぎる前に最大の明るさになるようにする（最遅900msで225ms＝ほぼ従来どおり）。
     const uint16_t FADE_IN_MS   = (WAVE_MS / 4 < 40) ? 40 : WAVE_MS / 4;
-    const uint16_t FADE_OUT_MS  = 600;  // 帯の範囲を外れてから消えきるまでの時間
-
-    // LEDごとに「前フレームで帯の範囲に入っていたか」と、その状態が最後に切り替わった
-    // 時刻・明るさを記憶しておく（点灯・消灯それぞれのフェードの基準点。
-    // REACTIVE_KEYS/TWINKLEと同じ、LEDの数だけ独立したスロットを持つ方式）。
-    static bool     gate_prev[RGB_MATRIX_LED_COUNT];
-    static uint16_t on_since[RGB_MATRIX_LED_COUNT];
-    static uint16_t off_since[RGB_MATRIX_LED_COUNT];
-    static uint8_t  off_peak[RGB_MATRIX_LED_COUNT];
+    // 2026-10-09: 消え方を変更（本人希望「全てが光ってから全体がスッと消えるように」）。
+    // 帯が通過したLEDは光ったまま残り、帯が端まで流れきって全部が光った後、全体が一緒に
+    // FADE_OUT_MSかけて消える。以前は帯が通り過ぎたLEDから順に消えていた。
+    // keyball.cのgesture_wave_duration_ms()も同じ時間配分（流れる時間＋FADE_IN_MS＋
+    // FADE_OUT_MS）にしているので、変える時は両方揃えること。
+    const uint16_t FADE_OUT_MS  = 400;  // 全部が光った後、全体が消えきるまでの時間
+    const uint16_t ALL_LIT_MS   = WAVE_MS + FADE_IN_MS;  // 最後のLEDが最大の明るさになる時刻
 
     for (uint8_t i = led_min; i < led_max; i++) {
         HSV out;
@@ -804,12 +802,11 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
             out.s = 0;
             out.v = 0;  // 基本は消灯（GESTURE_WAVEと同じ。常時点灯はアンダーグローのみ）
 
-            // 帯の範囲に入っているかどうかの判定はGESTURE_WAVEと全く同じ式を使う。
-            bool gate = false;
+            uint8_t env = 0;
             for (uint8_t s = 0; s < KEYBALL_GESTURE_WAVE_SLOT_COUNT; s++) {
                 if (!keyball.gesture_wave_active[s]) continue;
                 uint16_t elapsed = timer_elapsed(keyball.gesture_wave_start[s]);
-                if (elapsed >= WAVE_MS) continue;
+                if (elapsed >= ALL_LIT_MS + FADE_OUT_MS) continue;
 
                 uint8_t  dir        = keyball.gesture_wave_dir[s];  // 0=上 1=下 2=左 3=右
                 bool     horizontal = (dir == 2 || dir == 3);
@@ -819,37 +816,24 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
                 uint8_t  range_max  = horizontal ? x_max : y_max;
                 uint16_t range      = (range_max > range_min) ? (uint16_t)(range_max - range_min) : 1;
 
-                // 起点・向きの反転はGESTURE_WAVEと同じ実機確認済みの値を使う
-                bool     from_min        = horizontal ? ((dir == 2) != kb_ball_on_physical_left()) : (dir == 1);
-                uint16_t wave_pos_scaled = (uint16_t)((uint32_t)elapsed * range / WAVE_MS);
-                uint8_t  wave_coord      = from_min ? (uint8_t)(range_min + wave_pos_scaled) : (uint8_t)(range_max - wave_pos_scaled);
+                // 起点・向きはGESTURE_WAVEと同じ実機確認済みの値を使う
+                bool    from_min = horizontal ? ((dir == 2) != kb_ball_on_physical_left()) : (dir == 1);
+                int16_t dist     = from_min ? (int16_t)coord - range_min : (int16_t)range_max - coord;  // 起点からの距離
+                // 帯の先端（帯の中心+幅）がこのLEDに届く時刻
+                int16_t  reach_d = dist - WAVE_WIDTH;
+                uint16_t reach   = reach_d <= 0 ? 0 : (uint16_t)((uint32_t)reach_d * WAVE_MS / range);
+                if (elapsed < reach) continue;
 
-                int16_t d = (int16_t)coord - (int16_t)wave_coord;
-                if (d < 0) d = -d;
-                if (d < WAVE_WIDTH) {
-                    gate = true;
-                    break;
+                uint16_t t_in  = elapsed - reach;
+                uint8_t  e_in  = (t_in >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t_in * 255) / FADE_IN_MS);
+                uint8_t  e_out = 255;
+                if (elapsed > ALL_LIT_MS) {
+                    uint16_t t_out = elapsed - ALL_LIT_MS;
+                    e_out          = (t_out >= FADE_OUT_MS) ? 0 : (uint8_t)(((uint32_t)(FADE_OUT_MS - t_out) * 255) / FADE_OUT_MS);
                 }
+                uint8_t e = (uint8_t)(((uint16_t)e_in * e_out) / 255);
+                if (e > env) env = e;
             }
-
-            uint8_t env;
-            if (gate) {
-                if (!gate_prev[i]) on_since[i] = timer_read();  // 消灯→点灯に切り替わった瞬間
-                uint16_t t = timer_elapsed(on_since[i]);
-                env         = (t >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t * 255) / FADE_IN_MS);
-            } else {
-                if (gate_prev[i]) {
-                    // ちょうど今、帯の範囲を外れた瞬間。その時点の明るさを記録して
-                    // そこからフェードアウトを始める（フェードイン途中でも不自然に
-                    // 飛ばないようにするため）。
-                    off_since[i]  = timer_read();
-                    uint16_t t_on = timer_elapsed(on_since[i]);
-                    off_peak[i]   = (t_on >= FADE_IN_MS) ? 255 : (uint8_t)(((uint32_t)t_on * 255) / FADE_IN_MS);
-                }
-                uint16_t t = timer_elapsed(off_since[i]);
-                env         = (t >= FADE_OUT_MS) ? 0 : (uint8_t)(((uint32_t)off_peak[i] * (FADE_OUT_MS - t)) / FADE_OUT_MS);
-            }
-            gate_prev[i] = gate;
 
             // GESTURE_WAVEと同じく、色相・彩度はジェスチャー専用の設定値をそのまま
             // 使う（ブレンドしない）。明るさだけを、設定値(peak)をenvの割合で
