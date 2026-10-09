@@ -771,14 +771,17 @@ static void gesture_wave_render_breath(uint8_t led_min, uint8_t led_max, bool ov
     // 帯の速さ・幅・起点はGESTURE_WAVEと完全に同じ式（keyball.cの
     // gesture_wave_duration_ms()もこのWAVE_MSの式＋FADE_OUT_MSの猶予、という前提で
     // 計算しているので、変更する場合はFADE_OUT_MSの値も含め必ず両方揃えること）。
-    const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 700 / 255);  // 200〜900ms
+    // 2026-10-09: ブリージングだけ最速を200ms→100msに（本人希望「もっと速くできるように」）。
+    // シャープは速くしすぎると目で追えないため従来どおり200〜900ms。keyball.cの
+    // gesture_wave_duration_ms()も同じ式にしていること。
+    const uint16_t WAVE_MS      = 900 - ((uint16_t)keyball.gesture_wave_speed * 800 / 255);  // 100〜900ms
     const uint8_t  WAVE_WIDTH_V = 20;   // GESTURE_WAVEと同じ幅（上下方向）
     const uint8_t  WAVE_WIDTH_H = 28;   // GESTURE_WAVEと同じ幅（左右方向。座標範囲が広い分太くしてある）
     // 帯の先端が届いてから最大の明るさになるまでの時間。2026-10-09: 本人希望「点灯時を
-    // もっとふわっと」で400msに延ばし、明るさの変化も一定の速さではなく、出だしと最後が
+    // もっとふわっと」で延ばし（その後「もう少し短く」で250msに）、明るさの変化も一定の速さではなく、出だしと最後が
     // ゆっくりの曲線（smoothstep）にした。全体が一緒に消える方式にしたので、帯が通り過ぎた
     // 後も光り続け、時間を延ばしても最大の明るさに届かず暗くなることはない。
-    const uint16_t FADE_IN_MS   = 400;
+    const uint16_t FADE_IN_MS   = 250;  // 2026-10-09: 400→250ms（本人希望「点灯時間はもう少し短く」）
     // 2026-10-09: 消え方を変更（本人希望「全てが光ってから全体がスッと消えるように」）。
     // 帯が通過したLEDは光ったまま残り、帯が端まで流れきって全部が光った後、全体が一緒に
     // FADE_OUT_MSかけて消える。以前は帯が通り過ぎたLEDから順に消えていた。
