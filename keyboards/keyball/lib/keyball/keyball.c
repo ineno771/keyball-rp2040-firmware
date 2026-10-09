@@ -750,15 +750,22 @@ static void keyball_boot_task(void) {
             if (boot_is_boot_mode(rgb_matrix_get_mode())) boot_set_mode(g_boot_saved_mode);
         }
     } else {
-        // スレーブはマスターから同期されたLEDモードで段階を判断する
+        // スレーブはマスターから同期されたLEDモードで段階を判断する。
+        // QMKのスレーブ側は、マスターからまだ何も届いていない間も受信用の共有メモリ（中身は0）を
+        // 毎スキャンrgb_matrix_configへ写すため、その間はモードが0になる
+        // （quantum/split_common/transactions.cのrgb_matrix_handlers_slave）。モード0は
+        // LED設定では使わない値（オフはdisableで表す）なので「まだ届いていない」とみなして待つ
+        // （2026-10-09、これを「演出終了」と誤判定してスレーブのロゴ演出が出ていなかった）。
         uint8_t mode = rgb_matrix_get_mode();
         if (mode == RGB_MATRIX_CUSTOM_BOOT_SPREAD) {
             if (g_boot_phase != KB_BOOT_ANIM) {
                 g_boot_phase      = KB_BOOT_ANIM;
                 g_boot_anim_start = timer_read();
             }
-        } else if (mode != RGB_MATRIX_CUSTOM_BOOT_WAIT || timer_read32() >= KB_BOOT_SLAVE_GIVEUP_MS) {
+        } else if (timer_read32() >= KB_BOOT_SLAVE_GIVEUP_MS) {
             g_boot_phase = KB_BOOT_DONE;
+        } else if (mode != 0 && mode != RGB_MATRIX_CUSTOM_BOOT_WAIT) {
+            g_boot_phase = KB_BOOT_DONE;  // 演出が終わった（または演出の後につながった）
         }
     }
 }
