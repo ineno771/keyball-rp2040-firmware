@@ -5,6 +5,8 @@
 #include "quantum_keycodes.h"
 #include "kb_settings.h"
 #include "eeprom.h"
+#include "dynamic_keymap.h"
+#include "matrix.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -823,4 +825,53 @@ static void kb_dpi_curve_rebuild_lut(void) {
 const uint8_t *kb_dpi_curve_lut_get(void) {
     if (!g_dpi_curve_lut_valid) kb_dpi_curve_rebuild_lut();
     return g_dpi_curve_lut;
+}
+
+// ── キーマップの左右の並びの移行（kb_settings.h末尾の説明を参照）─────────────────
+_Static_assert(MATRIX_COLS <= KB_ROW_ORDER_SCRATCH_COLS_MAX, "キーマップ移行の退避場所が足りません");
+
+void kb_row_order_mark_done(void) {
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_ROW_ORDER_STATE_EEPROM, KB_ROW_ORDER_STATE_DONE);
+}
+
+// QMKがEEPROMを初期化した直後（初期キーマップを書いた後）に呼ばれる。
+void eeconfig_init_user(void) {
+    kb_row_order_mark_done();
+}
+
+void kb_row_order_migrate(void) {
+    uint8_t state = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_ROW_ORDER_STATE_EEPROM);
+    if (state == KB_ROW_ORDER_STATE_DONE) return;
+    if (state != KB_ROW_ORDER_STATE_MIGRATING) {
+        // 進み具合を0にしてから「途中」の印を書く（逆順だと古い進み具合を信じてしまう）
+        eeprom_update_byte((uint8_t *)(uintptr_t)KB_ROW_ORDER_PROGRESS_EEPROM, 0);
+        eeprom_update_byte((uint8_t *)(uintptr_t)KB_ROW_ORDER_STATE_EEPROM, KB_ROW_ORDER_STATE_MIGRATING);
+    }
+
+    const uint8_t half  = MATRIX_ROWS / 2;
+    const uint8_t units = dynamic_keymap_get_layer_count() * half;  // 入れ替える行の組の数
+    uint16_t     *scratch = (uint16_t *)(uintptr_t)KB_ROW_ORDER_SCRATCH_EEPROM;
+    uint8_t       p       = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_ROW_ORDER_PROGRESS_EEPROM);
+
+    while ((p >> 1) < units) {
+        uint8_t layer = (p >> 1) / half;
+        uint8_t row   = (p >> 1) % half;
+        if (!(p & 1)) {
+            // 段階0: 2行とも退避場所へ写す（前半の行→先頭、後半の行→その後ろ）
+            for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+                eeprom_update_word(scratch + c, dynamic_keymap_get_keycode(layer, row, c));
+                eeprom_update_word(scratch + KB_ROW_ORDER_SCRATCH_COLS_MAX + c, dynamic_keymap_get_keycode(layer, row + half, c));
+            }
+            p |= 1;
+            eeprom_update_byte((uint8_t *)(uintptr_t)KB_ROW_ORDER_PROGRESS_EEPROM, p);
+        }
+        // 段階1: 退避場所の値から入れ替えて書き戻す（何度やり直しても同じ結果になる）
+        for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+            dynamic_keymap_set_keycode(layer, row, c, eeprom_read_word(scratch + KB_ROW_ORDER_SCRATCH_COLS_MAX + c));
+            dynamic_keymap_set_keycode(layer, row + half, c, eeprom_read_word(scratch + c));
+        }
+        p = (uint8_t)((p & ~1) + 2);
+        eeprom_update_byte((uint8_t *)(uintptr_t)KB_ROW_ORDER_PROGRESS_EEPROM, p);
+    }
+    kb_row_order_mark_done();
 }

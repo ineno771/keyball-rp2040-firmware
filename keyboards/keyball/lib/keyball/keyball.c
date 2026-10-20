@@ -515,12 +515,14 @@ static inline bool should_report(void) {
     return true;
 }
 
-// ボールの向きの補正（is_leftで符号を反転させる処理）に使う「このハーフは左手か」。
-// 既定はis_keyboard_left()。44・61・+のkeymap.cはis_keyboard_left()を「ボール搭載側=左」に
-// 上書きしているため、こちらは基板本来の左右(AVR版と同じ値)を返すよう上書きする
-// （2026-10-06、左手ボールのKeyball61でカーソルが上下左右とも反転していた不具合の修正）。
+// ボールの向きの補正（is_leftで符号を反転させる処理）を行う基板か。反転が必要なのは物理的な
+// 右手の基板（v0.4.x以前の判定で「左」になっていた側。v0.5.0で判定が物理と一致した後も、
+// 実機で確認済みの向きを変えないため同じ基板で反転する）。39・44・61・+のkeymap.cは
+// is_keyboard_left()を「ボール搭載側=左」に上書きしているため、基板本来の判定を使って
+// 同じ値を返すよう上書きしている（2026-10-06、左手ボールのKeyball61でカーソルが上下左右とも
+// 反転していた不具合の修正）。
 __attribute__((weak)) bool keyball_motion_is_left(void) {
-    return is_keyboard_left();
+    return !is_keyboard_left();
 }
 
 report_mouse_t pointing_device_driver_get_report(report_mouse_t rep) {
