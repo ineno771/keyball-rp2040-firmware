@@ -543,6 +543,15 @@ bool is_keyboard_left(void) {
 }
 
 
+// このハーフが物理的な左手の基板か（kb_hid.cのGET_BALL_SIDE用）。is_keyboard_left()は
+// 「ボール側＝左」に上書きしているため、基板本来の判定を返す。
+bool kb_this_side_is_physical_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    return (bool)g_hw_is_left;
+}
+
 // ボールの向きの補正（符号の反転）を行う基板か（keyball.cのkeyball_motion_is_left参照）。
 // 反転が必要なのは物理的な右手の基板（v0.4.x以前の判定で「左」になっていた側。実機で
 // 確認済みの動きを変えないため、v0.5.0で判定が物理と一致した後もこの基板で反転する）。

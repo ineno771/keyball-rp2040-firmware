@@ -214,6 +214,12 @@ void kb_led_config_sync_from_rgb_matrix(void) {
 // できずカーソルが動かない」）。
 __attribute__((weak)) void kb_hid_layer_link_changed(void) {}
 
+// このハーフ（USBをつないだ側）が物理的な左手の基板か。v0.5.0から基板本来の判定は物理と一致する。
+// is_keyboard_left()を「ボール側＝左」に上書きしているkeymap.cは、基板本来の値を返すよう上書きする。
+__attribute__((weak)) bool kb_this_side_is_physical_left(void) {
+    return is_keyboard_left();
+}
+
 void kb_hid_receive(uint8_t *data, uint8_t length) {
     uint8_t response[RAW_PACKET_SIZE] = {0};
     uint8_t cmd = data[0];
@@ -772,6 +778,20 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             response[2] = KB_FW_VERSION_MINOR;
             response[3] = KB_FW_VERSION_PATCH;
             response[4] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x35: ボールが物理的に左右どちらの基板にあるかを返す（Keyball Linkがボールの左右を自動で選ぶため）
+        // 応答: [cmd, this_is_left, this_have_ball, that_enable, that_have_ball, status]
+        //   this_is_left: このハーフ（USBをつないだ側）が物理的な左手か
+        //   that_enable:  反対側とつながって情報を交換済みか（0ならthat_have_ballは不明）
+        // 左右の基板の間の通信は増やさない（起動時の情報交換で分かっている値を返すだけ）。
+        case KB_HID_CMD_GET_BALL_SIDE: {
+            response[1] = kb_this_side_is_physical_left() ? 1 : 0;
+            response[2] = keyball.this_have_ball ? 1 : 0;
+            response[3] = keyball.that_enable ? 1 : 0;
+            response[4] = keyball.that_have_ball ? 1 : 0;
+            response[5] = KB_HID_STATUS_OK;
             break;
         }
 

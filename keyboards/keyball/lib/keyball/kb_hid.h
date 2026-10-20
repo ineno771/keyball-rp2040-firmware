@@ -61,6 +61,7 @@
 #define KB_HID_CMD_SET_GESTURE_WAVE_STYLE 0x32  // ジェスチャー連動LEDウェーブの見た目変更
 #define KB_HID_CMD_GET_GESTURE_WAVE_COLOR 0x33  // ジェスチャー連動LEDウェーブ専用の色(hue,sat,val)取得
 #define KB_HID_CMD_SET_GESTURE_WAVE_COLOR 0x34  // ジェスチャー連動LEDウェーブ専用の色変更
+#define KB_HID_CMD_GET_BALL_SIDE          0x35  // ボールが物理的に左右どちらの基板にあるか取得（v0.5.1〜）
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
