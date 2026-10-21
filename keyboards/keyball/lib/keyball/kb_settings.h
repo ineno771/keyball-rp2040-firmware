@@ -469,7 +469,7 @@ void kb_row_order_mark_done(void);
 void kb_row_order_migrate(void);
 
 // ── OLEDのアニメーション（LEDエフェクト連動）のON/OFF（2026-10-21、v0.5.2）──────────
-// 1バイト。KB_OLED_ANIM_OFF_VALUEの時だけOFF（揺れるロゴ）、それ以外（未書込みの0x00/0xFF含む）はON。
+// 1バイト。KB_OLED_ANIM_OFF_VALUEの時だけOFF（止まったロゴ）、それ以外（未書込みの0x00/0xFF含む）はON。
 #define KB_OLED_ANIM_EEPROM    0x0B10
 #define KB_OLED_ANIM_OFF_VALUE 0x01
 bool kb_oled_anim_enabled_get(void);

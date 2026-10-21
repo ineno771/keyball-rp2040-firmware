@@ -897,7 +897,7 @@ void oledkit_render_logo_user(void) {
     static bool was_handled = false;
     bool        handled     = false;
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
-    // Keyball LinkでOLEDのアニメーションをOFFにした時は、どのエフェクトでも揺れるロゴにする（v0.5.2〜）
+    // Keyball LinkでOLEDのアニメーションをOFFにした時は、どのエフェクトでも止まったロゴにする（v0.5.2〜）
     switch (keyball.oled_anim_off ? RGB_MATRIX_NONE : rgb_matrix_get_mode()) {
         case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
         case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(&anim_hallow); handled = true; break;
@@ -939,6 +939,8 @@ void oledkit_render_logo_user(void) {
         } else {
             swing = (int16_t)(AMPLITUDE - (int32_t)(t - PERIOD_MS / 2) * (2 * AMPLITUDE) / (PERIOD_MS / 2));
         }
+        // Keyball LinkでアニメーションをOFFにした時はロゴも揺らさず、元の静止位置に表示する（v0.5.3〜）
+        if (keyball.oled_anim_off) swing = 0;
         uint8_t margin = (uint8_t)(BASE_MARGIN + swing);
 
         char ch = 0x80;

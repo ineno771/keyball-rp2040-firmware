@@ -216,7 +216,7 @@ typedef struct {
     uint8_t cpi_value;
     bool    cpi_changed;  // マスター→スレーブへCPI（とOLEDアニメの設定）を送り直す必要があるか
 
-    // OLEDのアニメーション（LEDエフェクト連動）を止めて揺れるロゴにするか（v0.5.2〜）。
+    // OLEDのアニメーション（LEDエフェクト連動・ロゴの揺れ）を止めて、止まったロゴにするか（v0.5.2〜）。
     // 表示するのはUSBを挿していない側なので、マスターはKEYBALL_SET_CPIに載せてスレーブへ伝える。
     bool oled_anim_off;
 
