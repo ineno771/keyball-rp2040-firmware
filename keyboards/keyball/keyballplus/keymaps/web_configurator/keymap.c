@@ -914,7 +914,8 @@ void oledkit_render_logo_user(void) {
     static bool was_handled = false;
     bool        handled     = false;
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
-    switch (rgb_matrix_get_mode()) {
+    // Keyball LinkでOLEDのアニメーションをOFFにした時は、どのエフェクトでも揺れるロゴにする（v0.5.2〜）
+    switch (keyball.oled_anim_off ? RGB_MATRIX_NONE : rgb_matrix_get_mode()) {
         case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
         case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(&anim_hallow); handled = true; break;
         case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(&anim_easter); handled = true; break;

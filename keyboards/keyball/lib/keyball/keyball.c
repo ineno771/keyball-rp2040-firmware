@@ -865,9 +865,24 @@ static void rpc_get_motion_invoke(void) {
     return;
 }
 
+// KEYBALL_SET_CPIで送る内容。v0.5.2でOLEDアニメのON/OFFを相乗りさせた（新しい通信を増やさず、
+// CPIと同じく「変わった時・起動後の接続時」にだけ送る。定期的には送らない）。
+// v0.5.1以前のスレーブはflagsを読まずCPIだけ使い、v0.5.1以前のマスターからは1バイトだけ届く。
+typedef struct __attribute__((packed)) {
+    keyball_cpi_t cpi;
+    uint8_t       flags;
+} keyball_set_cpi_rpc_t;
+#define KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF 0x01
+
 static void rpc_set_cpi_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    keyball_cpi_t cpi = *(keyball_cpi_t *)in_data;
+    const keyball_set_cpi_rpc_t *req = (const keyball_set_cpi_rpc_t *)in_data;
+    keyball_cpi_t                cpi = req->cpi;
     keyball_set_cpi(cpi);
+    if (in_buflen >= sizeof(keyball_set_cpi_rpc_t)) {
+        bool off = (req->flags & KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF) != 0;
+        keyball.oled_anim_off = off;
+        kb_oled_anim_enabled_set(!off);  // スレーブ単独で再起動しても同じ表示で始まるよう自分にも保存
+    }
 
     // 2026-09-18: このハーフ（スレーブ）自身のEEPROMにもCPIを保存する。
     // 従来はマスターから届いたCPIをRAM(and this_have_ball==trueならセンサー本体)に
@@ -889,7 +904,10 @@ static void rpc_set_cpi_invoke(void) {
     if (!keyball.cpi_changed) {
         return;
     }
-    keyball_cpi_t req = keyball.cpi_value;
+    keyball_set_cpi_rpc_t req = {
+        .cpi   = keyball.cpi_value,
+        .flags = keyball.oled_anim_off ? KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF : 0,
+    };
     if (!transaction_rpc_send(KEYBALL_SET_CPI, sizeof(req), &req)) {
         return;
     }
@@ -1412,6 +1430,16 @@ uint8_t keyball_get_cpi(void) {
     return keyball.cpi_value == 0 ? CPI_DEFAULT : keyball.cpi_value;
 }
 
+bool keyball_get_oled_anim_enabled(void) {
+    return !keyball.oled_anim_off;
+}
+
+void keyball_set_oled_anim_enabled(bool enabled) {
+    keyball.oled_anim_off = !enabled;
+    kb_oled_anim_enabled_set(enabled);
+    keyball.cpi_changed = true;  // KEYBALL_SET_CPIに載せてスレーブへ送り直す
+}
+
 void keyball_set_cpi(uint8_t cpi) {
     if (cpi > CPI_MAX) {
         cpi = CPI_MAX;
@@ -1446,6 +1474,9 @@ void keyboard_post_init_kb(void) {
 #endif
     }
 #endif
+
+    // OLEDアニメのON/OFF（両ハーフとも自分のEEPROMから。スレーブはその後マスターから届いた値に合わせる）
+    keyball.oled_anim_off = !kb_oled_anim_enabled_get();
 
     // read keyball configuration from EEPROM
     if (eeconfig_is_enabled()) {

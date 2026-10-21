@@ -795,6 +795,22 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
+        // 0x36: OLEDのアニメーション（LEDエフェクト連動）のON/OFFを返す
+        // 応答: [cmd, enabled(0/1), status]
+        case KB_HID_CMD_GET_OLED_ANIM: {
+            response[1] = keyball_get_oled_anim_enabled() ? 1 : 0;
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x37: OLEDのアニメーションのON/OFFを変更する
+        // 要求: [cmd, enabled(0/1)]  応答: [cmd, status]
+        case KB_HID_CMD_SET_OLED_ANIM: {
+            keyball_set_oled_anim_enabled(data[1] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
         // 0x18: 超低速モードのCPI分周値・連動レイヤーを返す
         // 応答: [cmd, div, layer, status]
         case KB_HID_CMD_GET_PRECISION: {
