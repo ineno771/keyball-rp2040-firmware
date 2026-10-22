@@ -108,7 +108,7 @@ void    kb_gesture_th_v_set(uint8_t v);
 //   0x0AE6-0x0AEB ウェーブの色（2モード×3バイト）  0x0AEC-0x0AED 色の保存済み目印
 // 全機種共通の番地（キーマップ領域との衝突は冒頭の_Static_assertで検査済み、EEPROMは
 // 0x0000-0x0FFFの4096バイト）。0x0AEE-0x0B0Fはキーマップの左右の並びの移行（本ファイル末尾）が使用。
-// 0x0B10はOLEDアニメのON/OFF（本ファイル末尾）。次にここへ設定を追加する場合は0x0B11から。
+// 0x0B10はOLEDアニメ、0x0B11は起動アニメのON/OFF（本ファイル末尾）。次にここへ設定を追加する場合は0x0B12から。
 #define KB_GESTURE_MODE_LEGACY_COUNT        4
 #define KB_GESTURE_MODE_EXT_TABLE_EEPROM    0x0ACE
 #define KB_GESTURE_WAVE_SPEED_EXT_EEPROM    0x0AE2
@@ -474,3 +474,10 @@ void kb_row_order_migrate(void);
 #define KB_OLED_ANIM_OFF_VALUE 0x01
 bool kb_oled_anim_enabled_get(void);
 void kb_oled_anim_enabled_set(bool enabled);
+
+// ── 起動アニメーションのON/OFF（2026-10-22、v0.5.7）──────────────────────────
+// 1バイト。KB_BOOT_ANIM_OFF_VALUEの時だけOFF、それ以外（未書込みの0x00/0xFF含む）はON。
+#define KB_BOOT_ANIM_EEPROM    0x0B11
+#define KB_BOOT_ANIM_OFF_VALUE 0x01
+bool kb_boot_anim_enabled_get(void);
+void kb_boot_anim_enabled_set(bool enabled);

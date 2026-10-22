@@ -64,6 +64,8 @@
 #define KB_HID_CMD_GET_BALL_SIDE          0x35  // ボールが物理的に左右どちらの基板にあるか取得（v0.5.1〜）
 #define KB_HID_CMD_GET_OLED_ANIM          0x36  // OLEDのアニメーション（LEDエフェクト連動）のON/OFF取得（v0.5.2〜）
 #define KB_HID_CMD_SET_OLED_ANIM          0x37  // OLEDのアニメーションのON/OFF変更（EEPROMに保存し、スレーブへも送る）
+#define KB_HID_CMD_GET_BOOT_ANIM          0x38  // 起動アニメーションのON/OFF取得（v0.5.7〜）
+#define KB_HID_CMD_SET_BOOT_ANIM          0x39  // 起動アニメーションのON/OFF変更（次の起動から反映）
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00

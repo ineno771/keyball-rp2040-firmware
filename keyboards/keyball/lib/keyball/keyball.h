@@ -219,6 +219,9 @@ typedef struct {
     // OLEDのアニメーション（LEDエフェクト連動・ロゴの揺れ）を止めて、止まったロゴにするか（v0.5.2〜）。
     // 表示するのはUSBを挿していない側なので、マスターはKEYBALL_SET_CPIに載せてスレーブへ伝える。
     bool oled_anim_off;
+    // 起動アニメーション（LEDが中央から広がる・OLEDのロゴ）をしないか（v0.5.7〜）。決めるのはマスターだが、
+    // USBを挿す側を変えても同じになるよう、OLEDアニメと同じくKEYBALL_SET_CPIでスレーブにも保存させる。
+    bool boot_anim_off;
 
     bool     scroll_mode;
     uint32_t scroll_mode_changed;
@@ -459,6 +462,10 @@ void keyball_set_cpi(uint8_t cpi);
 /// OLEDのアニメーション（LEDエフェクト連動）のON/OFF。変更はEEPROMに保存し、スレーブへも送る。
 bool keyball_get_oled_anim_enabled(void);
 void keyball_set_oled_anim_enabled(bool enabled);
+
+/// 起動アニメーションのON/OFF。変更はEEPROMに保存し、スレーブへも送る（次の起動から反映）。
+bool keyball_get_boot_anim_enabled(void);
+void keyball_set_boot_anim_enabled(bool enabled);
 
 /// keyball_get_accel gets current pointer acceleration level (0=off, 1-10).
 uint8_t keyball_get_accel(void);

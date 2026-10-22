@@ -738,6 +738,12 @@ static bool boot_is_boot_mode(uint8_t mode) {
 
 // keyboard_post_init_kbから両ハーフで呼ぶ（いつものLED設定を反映した直後）
 static void keyball_boot_init(void) {
+    // 起動アニメーションをOFFにしている時は、待たずにいつもの表示から始める。スレーブは
+    // マスターから届いたいつものLEDモードを見て、演出なしで終わりにする（keyball_boot_task）。
+    if (keyball.boot_anim_off && is_keyboard_master()) {
+        g_boot_phase = KB_BOOT_DONE;
+        return;
+    }
     uint8_t mode      = rgb_matrix_get_mode();
     g_boot_saved_mode = boot_is_boot_mode(mode) ? RGB_MATRIX_SOLID_COLOR : mode;
     g_boot_phase      = KB_BOOT_WAIT;
@@ -927,6 +933,7 @@ typedef struct __attribute__((packed)) {
     uint8_t       flags;
 } keyball_set_cpi_rpc_t;
 #define KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF 0x01
+#define KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF 0x02
 
 static void rpc_set_cpi_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
     const keyball_set_cpi_rpc_t *req = (const keyball_set_cpi_rpc_t *)in_data;
@@ -936,6 +943,9 @@ static void rpc_set_cpi_handler(uint8_t in_buflen, const void *in_data, uint8_t 
         bool off = (req->flags & KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF) != 0;
         keyball.oled_anim_off = off;
         kb_oled_anim_enabled_set(!off);  // スレーブ単独で再起動しても同じ表示で始まるよう自分にも保存
+        bool boot_off         = (req->flags & KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF) != 0;
+        keyball.boot_anim_off = boot_off;
+        kb_boot_anim_enabled_set(!boot_off);  // USBを挿す側を変えても同じになるよう自分にも保存
     }
 
     // 2026-09-18: このハーフ（スレーブ）自身のEEPROMにもCPIを保存する。
@@ -960,7 +970,7 @@ static void rpc_set_cpi_invoke(void) {
     }
     keyball_set_cpi_rpc_t req = {
         .cpi   = keyball.cpi_value,
-        .flags = keyball.oled_anim_off ? KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF : 0,
+        .flags = (uint8_t)((keyball.oled_anim_off ? KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF : 0) | (keyball.boot_anim_off ? KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF : 0)),
     };
     if (!transaction_rpc_send(KEYBALL_SET_CPI, sizeof(req), &req)) {
         return;
@@ -1494,6 +1504,16 @@ void keyball_set_oled_anim_enabled(bool enabled) {
     keyball.cpi_changed = true;  // KEYBALL_SET_CPIに載せてスレーブへ送り直す
 }
 
+bool keyball_get_boot_anim_enabled(void) {
+    return !keyball.boot_anim_off;
+}
+
+void keyball_set_boot_anim_enabled(bool enabled) {
+    keyball.boot_anim_off = !enabled;
+    kb_boot_anim_enabled_set(enabled);
+    keyball.cpi_changed = true;  // KEYBALL_SET_CPIに載せてスレーブへ送り直す
+}
+
 void keyball_set_cpi(uint8_t cpi) {
     if (cpi > CPI_MAX) {
         cpi = CPI_MAX;
@@ -1531,6 +1551,7 @@ void keyboard_post_init_kb(void) {
 
     // OLEDアニメのON/OFF（両ハーフとも自分のEEPROMから。スレーブはその後マスターから届いた値に合わせる）
     keyball.oled_anim_off = !kb_oled_anim_enabled_get();
+    keyball.boot_anim_off = !kb_boot_anim_enabled_get();
 
     // read keyball configuration from EEPROM
     if (eeconfig_is_enabled()) {

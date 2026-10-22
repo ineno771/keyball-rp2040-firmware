@@ -811,6 +811,22 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
+        // 0x38: 起動アニメーションのON/OFFを返す
+        // 応答: [cmd, enabled(0/1), status]
+        case KB_HID_CMD_GET_BOOT_ANIM: {
+            response[1] = keyball_get_boot_anim_enabled() ? 1 : 0;
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x39: 起動アニメーションのON/OFFを変更する（次の起動から反映）
+        // 要求: [cmd, enabled(0/1)]  応答: [cmd, status]
+        case KB_HID_CMD_SET_BOOT_ANIM: {
+            keyball_set_boot_anim_enabled(data[1] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
         // 0x18: 超低速モードのCPI分周値・連動レイヤーを返す
         // 応答: [cmd, div, layer, status]
         case KB_HID_CMD_GET_PRECISION: {

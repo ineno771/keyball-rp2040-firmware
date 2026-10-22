@@ -884,3 +884,12 @@ bool kb_oled_anim_enabled_get(void) {
 void kb_oled_anim_enabled_set(bool enabled) {
     eeprom_update_byte((uint8_t *)(uintptr_t)KB_OLED_ANIM_EEPROM, enabled ? 0x00 : KB_OLED_ANIM_OFF_VALUE);
 }
+
+// ── 起動アニメーションのON/OFF（kb_settings.h末尾参照）───────────────────────
+bool kb_boot_anim_enabled_get(void) {
+    return eeprom_read_byte((const uint8_t *)(uintptr_t)KB_BOOT_ANIM_EEPROM) != KB_BOOT_ANIM_OFF_VALUE;
+}
+
+void kb_boot_anim_enabled_set(bool enabled) {
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_BOOT_ANIM_EEPROM, enabled ? 0x00 : KB_BOOT_ANIM_OFF_VALUE);
+}
