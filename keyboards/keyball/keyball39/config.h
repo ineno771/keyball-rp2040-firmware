@@ -35,9 +35,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // 物理的な左右と逆に判定されていた。保存済みキーマップはkb_row_order_migrate()で自動移行する。
 #define SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT
 #define SPLIT_USB_DETECT
-// 反対側とつながっていない間に、つながったかを確かめ直す間隔（QMK標準は500ms）。起動直後に
-// 反対側の準備ができてから演出が始まるまでの待ちを縮める（2026-10-22）。つながった後は関係しない。
-#define SPLIT_CONNECTION_CHECK_TIMEOUT 100
 #ifdef OLED_ENABLE
 #    define SPLIT_OLED_ENABLE
 #endif
