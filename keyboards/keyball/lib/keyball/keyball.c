@@ -737,26 +737,32 @@ static bool boot_is_boot_mode(uint8_t mode) {
 }
 
 // keyboard_post_init_kbから両ハーフで呼ぶ（いつものLED設定を反映した直後）
+// 起動アニメーションをOFFにしている時も、ここまでは同じ（左右がつながるまで両側とも消灯して
+// 待つ）。つながった瞬間に演出を飛ばしていつもの表示を左右同時に始める（boot_start_anim）。
+// 2026-10-22: 最初はOFFの時に待たずに始めていたが、USB側だけ先に光り出して左右のLEDの
+// 動きがずれた（本人報告）ため、演出ありの時と同じく左右がつながってから始めるようにした。
 static void keyball_boot_init(void) {
-    // 起動アニメーションをOFFにしている時は、待たずにいつもの表示から始める。スレーブは
-    // マスターから届いたいつものLEDモードを見て、演出なしで終わりにする（keyball_boot_task）。
-    if (keyball.boot_anim_off && is_keyboard_master()) {
-        g_boot_phase = KB_BOOT_DONE;
-        return;
-    }
     uint8_t mode      = rgb_matrix_get_mode();
     g_boot_saved_mode = boot_is_boot_mode(mode) ? RGB_MATRIX_SOLID_COLOR : mode;
     g_boot_phase      = KB_BOOT_WAIT;
     boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_WAIT);  // オン/オフの状態はそのまま
 }
 
+static void apply_layer_led_now(uint8_t hl);
+
 static void boot_start_anim(void) {
+    if (keyball.boot_anim_off) {
+        // 演出なし: いつものLED表示へ直接戻す（スレーブはモードの同期を見て同時に終わる）
+        g_boot_phase = KB_BOOT_DONE;
+        apply_layer_led_now(get_highest_layer(layer_state | default_layer_state));
+        if (boot_is_boot_mode(rgb_matrix_get_mode())) boot_set_mode(g_boot_saved_mode);
+        return;
+    }
     g_boot_phase      = KB_BOOT_ANIM;
     g_boot_anim_start = timer_read();
     boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_SPREAD);
 }
 
-static void apply_layer_led_now(uint8_t hl);
 
 // 毎スキャン両ハーフで呼ぶ
 static void keyball_boot_task(void) {
