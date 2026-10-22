@@ -73,7 +73,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //////////////////////////////////////////////////////////////////////////////
 // Constants
 
-#define KEYBALL_TX_GETINFO_INTERVAL 500
+// 左右の情報交換（起動時に1回だけ成功すれば終わり）を試す間隔。反対側の起動を待つ間だけ送るので、
+// つながった後の通信量は変わらない。2026-10-22に500→50ms（起動演出が始まるまでの待ちを縮めるため）。
+#define KEYBALL_TX_GETINFO_INTERVAL 50
 #define KEYBALL_TX_GETMOTION_INTERVAL 4
 
 #if (PRODUCT_ID & 0xff00) == 0x0000
