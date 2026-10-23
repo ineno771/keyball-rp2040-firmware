@@ -515,12 +515,14 @@ static inline bool should_report(void) {
     return true;
 }
 
-// ボールの向きの補正（is_leftで符号を反転させる処理）に使う「このハーフは左手か」。
-// 既定はis_keyboard_left()。44・61・+のkeymap.cはis_keyboard_left()を「ボール搭載側=左」に
-// 上書きしているため、こちらは基板本来の左右(AVR版と同じ値)を返すよう上書きする
-// （2026-10-06、左手ボールのKeyball61でカーソルが上下左右とも反転していた不具合の修正）。
+// ボールの向きの補正（is_leftで符号を反転させる処理）を行う基板か。反転が必要なのは物理的な
+// 右手の基板（v0.4.x以前の判定で「左」になっていた側。v0.5.0で判定が物理と一致した後も、
+// 実機で確認済みの向きを変えないため同じ基板で反転する）。39・44・61・+のkeymap.cは
+// is_keyboard_left()を「ボール搭載側=左」に上書きしているため、基板本来の判定を使って
+// 同じ値を返すよう上書きしている（2026-10-06、左手ボールのKeyball61でカーソルが上下左右とも
+// 反転していた不具合の修正）。
 __attribute__((weak)) bool keyball_motion_is_left(void) {
-    return is_keyboard_left();
+    return !is_keyboard_left();
 }
 
 report_mouse_t pointing_device_driver_get_report(report_mouse_t rep) {
@@ -702,6 +704,21 @@ static uint16_t g_boot_anim_start = 0;
 static uint8_t  g_boot_saved_mode = RGB_MATRIX_SOLID_COLOR;
 static bool     g_boot_negotiated = false;
 
+// 起動演出から設定したエフェクト・OLED表示への切り替えを、パッと変えずに約0.5秒かけて
+// 溶け込ませる（2026-10-22、本人希望）。LEDは、エフェクトが書く色に起動演出の色を混ぜ、
+// 混ぜる割合を少しずつ減らす（QMKのrgb_matrix_set_colorに足した差し込み口
+// rgb_matrix_color_filter_kbを使う。patches/0004参照）。OLEDはoledkit.cが点を少しずつ入れ替える。
+// 左右とも、自分が起動演出の終わりを知った時に始める（スレーブはLEDモードの同期で知る）。
+#        define KB_BOOT_FADE_MS 500
+static bool     g_boot_fading     = false;
+static uint16_t g_boot_fade_start = 0;
+static RGB      g_boot_rgb        = {0, 0, 0};  // 起動演出の最後の色（全部が点いた状態の色）
+
+static void boot_start_fade(void) {
+    g_boot_fading     = true;
+    g_boot_fade_start = timer_read();
+}
+
 // LEDのモードを切り替える。QMKのrgb_matrix_mode_noeeprom()はLEDがオフの時は何もしない
 // （quantum/rgb_matrix/rgb_matrix.c）ため、オフの時はモードの値だけを直接書き換える。
 // 反対側への合図はこのモードの値の同期（PUT_RGB_MATRIX、100msごとの強制同期あり）で
@@ -720,6 +737,10 @@ static bool boot_is_boot_mode(uint8_t mode) {
 }
 
 // keyboard_post_init_kbから両ハーフで呼ぶ（いつものLED設定を反映した直後）
+// 起動アニメーションをOFFにしている時も、ここまでは同じ（左右がつながるまで両側とも消灯して
+// 待つ）。つながった瞬間に演出を飛ばしていつもの表示を左右同時に始める（boot_start_anim）。
+// 2026-10-22: 最初はOFFの時に待たずに始めていたが、USB側だけ先に光り出して左右のLEDの
+// 動きがずれた（本人報告）ため、演出ありの時と同じく左右がつながってから始めるようにした。
 static void keyball_boot_init(void) {
     uint8_t mode      = rgb_matrix_get_mode();
     g_boot_saved_mode = boot_is_boot_mode(mode) ? RGB_MATRIX_SOLID_COLOR : mode;
@@ -727,22 +748,33 @@ static void keyball_boot_init(void) {
     boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_WAIT);  // オン/オフの状態はそのまま
 }
 
+static void apply_layer_led_now(uint8_t hl);
+
 static void boot_start_anim(void) {
+    if (keyball.boot_anim_off) {
+        // 演出なし: いつものLED表示へ直接戻す（スレーブはモードの同期を見て同時に終わる）
+        g_boot_phase = KB_BOOT_DONE;
+        apply_layer_led_now(get_highest_layer(layer_state | default_layer_state));
+        if (boot_is_boot_mode(rgb_matrix_get_mode())) boot_set_mode(g_boot_saved_mode);
+        return;
+    }
     g_boot_phase      = KB_BOOT_ANIM;
     g_boot_anim_start = timer_read();
     boot_set_mode(RGB_MATRIX_CUSTOM_BOOT_SPREAD);
 }
 
-static void apply_layer_led_now(uint8_t hl);
 
 // 毎スキャン両ハーフで呼ぶ
 static void keyball_boot_task(void) {
     if (g_boot_phase == KB_BOOT_DONE) return;
+    // 演出中の色を覚えておく（演出が終わった瞬間にはもう次の色に変わっていることがあるため）
+    if (g_boot_phase == KB_BOOT_ANIM) g_boot_rgb = hsv_to_rgb(rgb_matrix_config.hsv);
     if (is_keyboard_master()) {
         if (g_boot_phase == KB_BOOT_WAIT) {
             if (g_boot_negotiated || timer_read32() >= KB_BOOT_FALLBACK_MS) boot_start_anim();
         } else if (timer_elapsed(g_boot_anim_start) >= KB_BOOT_ANIM_MS) {
             g_boot_phase = KB_BOOT_DONE;
+            boot_start_fade();
             // 演出中に押されたレイヤーも含め、今あるべきLED表示へ戻す
             apply_layer_led_now(get_highest_layer(layer_state | default_layer_state));
             // LEDオフ設定の時はモードが起動演出のまま残るので、元のモードへ戻す
@@ -765,13 +797,49 @@ static void keyball_boot_task(void) {
         } else if (timer_read32() >= KB_BOOT_SLAVE_GIVEUP_MS) {
             g_boot_phase = KB_BOOT_DONE;
         } else if (mode != 0 && mode != RGB_MATRIX_CUSTOM_BOOT_WAIT) {
-            g_boot_phase = KB_BOOT_DONE;  // 演出が終わった（または演出の後につながった）
+            // 演出が終わった（または演出の後につながった）。演出を見せていた時だけ溶け込ませる
+            if (g_boot_phase == KB_BOOT_ANIM) boot_start_fade();
+            g_boot_phase = KB_BOOT_DONE;
         }
     }
 }
 
 bool keyball_boot_active(void) {
     return g_boot_phase != KB_BOOT_DONE;
+}
+
+// 溶け込みの進み具合（0〜256）。溶け込み中でなければ256。
+static uint16_t boot_fade_amount(void) {
+    if (!g_boot_fading) return 256;
+    uint16_t e = timer_elapsed(g_boot_fade_start);
+    if (e >= KB_BOOT_FADE_MS) {
+        g_boot_fading = false;
+        return 256;
+    }
+    // smoothstep（始めと終わりがゆっくり）: 3p^2 - 2p^3
+    uint32_t p = (uint32_t)e * 256 / KB_BOOT_FADE_MS;
+    return (uint16_t)((3 * p * p * 256 - 2 * p * p * p) / (256 * 256));
+}
+
+// QMK（patches/0004）から、各LEDに色を書く直前に呼ばれる。溶け込み中は起動演出の色を混ぜる。
+void rgb_matrix_color_filter_kb(int index, uint8_t *red, uint8_t *green, uint8_t *blue) {
+    if (!g_boot_fading) return;
+    uint16_t a = boot_fade_amount();
+    if (a >= 256) return;
+    uint16_t b = 256 - a;
+    *red       = (uint8_t)(((uint16_t)*red * a + (uint16_t)g_boot_rgb.r * b) >> 8);
+    *green     = (uint8_t)(((uint16_t)*green * a + (uint16_t)g_boot_rgb.g * b) >> 8);
+    *blue      = (uint8_t)(((uint16_t)*blue * a + (uint16_t)g_boot_rgb.b * b) >> 8);
+}
+
+// oledkit.cの弱い関数を上書き。溶け込み中ならtrueと経過msを返す（OLEDの点の入れ替えに使う）。
+bool oledkit_boot_fade(uint16_t *elapsed_ms, uint16_t *total_ms) {
+    if (!g_boot_fading) return false;
+    uint16_t e = timer_elapsed(g_boot_fade_start);
+    if (e >= KB_BOOT_FADE_MS) return false;  // 終わりの判定はLED側（boot_fade_amount）でも行う
+    *elapsed_ms = e;
+    *total_ms   = KB_BOOT_FADE_MS;
+    return true;
 }
 
 // oledkit.cの弱い関数を上書き。0=待機（消灯） 1=演出中（elapsedに経過ms） 2=終了
@@ -863,9 +931,28 @@ static void rpc_get_motion_invoke(void) {
     return;
 }
 
+// KEYBALL_SET_CPIで送る内容。v0.5.2でOLEDアニメのON/OFFを相乗りさせた（新しい通信を増やさず、
+// CPIと同じく「変わった時・起動後の接続時」にだけ送る。定期的には送らない）。
+// v0.5.1以前のスレーブはflagsを読まずCPIだけ使い、v0.5.1以前のマスターからは1バイトだけ届く。
+typedef struct __attribute__((packed)) {
+    keyball_cpi_t cpi;
+    uint8_t       flags;
+} keyball_set_cpi_rpc_t;
+#define KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF 0x01
+#define KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF 0x02
+
 static void rpc_set_cpi_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
-    keyball_cpi_t cpi = *(keyball_cpi_t *)in_data;
+    const keyball_set_cpi_rpc_t *req = (const keyball_set_cpi_rpc_t *)in_data;
+    keyball_cpi_t                cpi = req->cpi;
     keyball_set_cpi(cpi);
+    if (in_buflen >= sizeof(keyball_set_cpi_rpc_t)) {
+        bool off = (req->flags & KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF) != 0;
+        keyball.oled_anim_off = off;
+        kb_oled_anim_enabled_set(!off);  // スレーブ単独で再起動しても同じ表示で始まるよう自分にも保存
+        bool boot_off         = (req->flags & KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF) != 0;
+        keyball.boot_anim_off = boot_off;
+        kb_boot_anim_enabled_set(!boot_off);  // USBを挿す側を変えても同じになるよう自分にも保存
+    }
 
     // 2026-09-18: このハーフ（スレーブ）自身のEEPROMにもCPIを保存する。
     // 従来はマスターから届いたCPIをRAM(and this_have_ball==trueならセンサー本体)に
@@ -887,7 +974,10 @@ static void rpc_set_cpi_invoke(void) {
     if (!keyball.cpi_changed) {
         return;
     }
-    keyball_cpi_t req = keyball.cpi_value;
+    keyball_set_cpi_rpc_t req = {
+        .cpi   = keyball.cpi_value,
+        .flags = (uint8_t)((keyball.oled_anim_off ? KEYBALL_SET_CPI_FLAG_OLED_ANIM_OFF : 0) | (keyball.boot_anim_off ? KEYBALL_SET_CPI_FLAG_BOOT_ANIM_OFF : 0)),
+    };
     if (!transaction_rpc_send(KEYBALL_SET_CPI, sizeof(req), &req)) {
         return;
     }
@@ -1410,6 +1500,26 @@ uint8_t keyball_get_cpi(void) {
     return keyball.cpi_value == 0 ? CPI_DEFAULT : keyball.cpi_value;
 }
 
+bool keyball_get_oled_anim_enabled(void) {
+    return !keyball.oled_anim_off;
+}
+
+void keyball_set_oled_anim_enabled(bool enabled) {
+    keyball.oled_anim_off = !enabled;
+    kb_oled_anim_enabled_set(enabled);
+    keyball.cpi_changed = true;  // KEYBALL_SET_CPIに載せてスレーブへ送り直す
+}
+
+bool keyball_get_boot_anim_enabled(void) {
+    return !keyball.boot_anim_off;
+}
+
+void keyball_set_boot_anim_enabled(bool enabled) {
+    keyball.boot_anim_off = !enabled;
+    kb_boot_anim_enabled_set(enabled);
+    keyball.cpi_changed = true;  // KEYBALL_SET_CPIに載せてスレーブへ送り直す
+}
+
 void keyball_set_cpi(uint8_t cpi) {
     if (cpi > CPI_MAX) {
         cpi = CPI_MAX;
@@ -1444,6 +1554,10 @@ void keyboard_post_init_kb(void) {
 #endif
     }
 #endif
+
+    // OLEDアニメのON/OFF（両ハーフとも自分のEEPROMから。スレーブはその後マスターから届いた値に合わせる）
+    keyball.oled_anim_off = !kb_oled_anim_enabled_get();
+    keyball.boot_anim_off = !kb_boot_anim_enabled_get();
 
     // read keyball configuration from EEPROM
     if (eeconfig_is_enabled()) {

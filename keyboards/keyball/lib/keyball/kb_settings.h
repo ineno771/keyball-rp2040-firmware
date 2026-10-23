@@ -107,7 +107,8 @@ void    kb_gesture_th_v_set(uint8_t v);
 //   0x0AE2-0x0AE3 ウェーブの速さ  0x0AE4-0x0AE5 ウェーブの見た目
 //   0x0AE6-0x0AEB ウェーブの色（2モード×3バイト）  0x0AEC-0x0AED 色の保存済み目印
 // 全機種共通の番地（キーマップ領域との衝突は冒頭の_Static_assertで検査済み、EEPROMは
-// 0x0000-0x0FFFの4096バイト）。次にここへ設定を追加する場合は0x0AEEから。
+// 0x0000-0x0FFFの4096バイト）。0x0AEE-0x0B0Fはキーマップの左右の並びの移行（本ファイル末尾）が使用。
+// 0x0B10はOLEDアニメ、0x0B11は起動アニメのON/OFF（本ファイル末尾）。次にここへ設定を追加する場合は0x0B12から。
 #define KB_GESTURE_MODE_LEGACY_COUNT        4
 #define KB_GESTURE_MODE_EXT_TABLE_EEPROM    0x0ACE
 #define KB_GESTURE_WAVE_SPEED_EXT_EEPROM    0x0AE2
@@ -441,3 +442,42 @@ void kb_dpi_curve_points_set(const uint8_t *points);
 // 毎回のポインター移動処理では単純な配列参照だけで済む（keymap.c参照）。
 #define KB_DPI_CURVE_LUT_SIZE 128
 const uint8_t *kb_dpi_curve_lut_get(void);
+
+// ── キーマップの左右の並びの移行（2026-10-20、v0.5.0の左右判定の根本修正）──────────
+// v0.4.x以前はQMKの仕様変更（#22775）の影響で基板の左右判定が物理と逆になっており、
+// 保存済みキーマップは「行0-3（Keyball61は0-4）＝物理的な右手」の並びだった。v0.5.0で
+// SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFTを入れて判定を物理と一致させたため、行0-3＝物理的な
+// 左手になる。更新した利用者のキー配置が変わらないよう、更新後の初回起動で、その基板の
+// EEPROMに保存されているキーマップの前半の行と後半の行を入れ替える（左右の基板それぞれが
+// 自分のEEPROMに対して行う）。
+//   0x0AEE 状態（DONE=新しい並び・移行済み / MIGRATING=移行の途中 / それ以外=旧い並び）
+//   0x0AEF 進み具合（(行の組の番号)×2 + 段階。段階1=退避済みで書き戻し中）
+//   0x0AF0-0x0B0F 退避場所（入れ替える2行分、最大16列×2バイト）
+// 途中で電源が抜けても、退避した元の値から書き直すので、2回入れ替わったり壊れたりしない。
+// EEPROMを初期化した時（初回書き込み・正規ファームからの書き換え・Keyball Linkの初期化）は
+// 初期キーマップが最初から新しい並びなので、DONEにするだけで入れ替えない。
+#define KB_ROW_ORDER_STATE_EEPROM     0x0AEE
+#define KB_ROW_ORDER_PROGRESS_EEPROM  0x0AEF
+#define KB_ROW_ORDER_SCRATCH_EEPROM   0x0AF0
+#define KB_ROW_ORDER_SCRATCH_COLS_MAX 8
+#define KB_ROW_ORDER_STATE_DONE       0xA5
+#define KB_ROW_ORDER_STATE_MIGRATING  0x5A
+
+// EEPROMを初期化した時に呼ぶ（eeconfig_init_user）。
+void kb_row_order_mark_done(void);
+// 起動時に一度呼ぶ（keyboard_post_init_user）。旧い並びなら入れ替える。
+void kb_row_order_migrate(void);
+
+// ── OLEDのアニメーション（LEDエフェクト連動）のON/OFF（2026-10-21、v0.5.2）──────────
+// 1バイト。KB_OLED_ANIM_OFF_VALUEの時だけOFF（止まったロゴ）、それ以外（未書込みの0x00/0xFF含む）はON。
+#define KB_OLED_ANIM_EEPROM    0x0B10
+#define KB_OLED_ANIM_OFF_VALUE 0x01
+bool kb_oled_anim_enabled_get(void);
+void kb_oled_anim_enabled_set(bool enabled);
+
+// ── 起動アニメーションのON/OFF（2026-10-22、v0.5.7）──────────────────────────
+// 1バイト。KB_BOOT_ANIM_OFF_VALUEの時だけOFF、それ以外（未書込みの0x00/0xFF含む）はON。
+#define KB_BOOT_ANIM_EEPROM    0x0B11
+#define KB_BOOT_ANIM_OFF_VALUE 0x01
+bool kb_boot_anim_enabled_get(void);
+void kb_boot_anim_enabled_set(bool enabled);

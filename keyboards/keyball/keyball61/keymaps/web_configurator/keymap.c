@@ -297,52 +297,52 @@ static void dflick_task(const report_mouse_t *mouse_report) {
 // clang-format off
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   [0] = {
-    {     45,     39,     38,      0,     37,     36,     35,      0 },
-    {     47,     19,     18,      0,     12,     24,     28,      0 },
-    {     52,  17203,     15,      0,     14,     13,     11,      0 },
-    {    647,     56,     55,      0,     54,     16,     17,     49 },
-    {  17289,    229,    226,      0,    227,  16785,  16938,  16680 },
     {     41,     30,     31,      0,     32,     33,     34,      0 },
     {     43,     20,     26,      0,      8,     21,     23,      0 },
     {    224,      4,     22,      0,      7,      9,     10,      0 },
     {     57,     29,     27,      0,      6,     25,      5,     48 },
     {     74,    225,    226,      0,    227,  17297,     44,  17040 },
+    {     45,     39,     38,      0,     37,     36,     35,      0 },
+    {     47,     19,     18,      0,     12,     24,     28,      0 },
+    {     52,  17203,     15,      0,     14,     13,     11,      0 },
+    {    647,     56,     55,      0,     54,     16,     17,     49 },
+    {  17289,    229,    226,      0,    227,  16785,  16938,  16680 },
   },
   [1] = {
-    {     69,     68,     67,      0,     66,     65,     64,      0 },
-    {      0,      0,      0,      0,    211,      0,      0,      0 },
-    {      0,  21027,    210,      0,     82,    209,      0,      0 },
-    {      0,      0,     79,      0,     81,     80,      0,      0 },
-    {      0,      0,     39,      0,     55,      1,      1,      1 },
     {     58,     59,     60,      0,     61,     62,     63,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      1,      1,      1 },
+    {     69,     68,     67,      0,     66,     65,     64,      0 },
+    {      0,      0,      0,      0,    211,      0,      0,      0 },
+    {      0,  21027,    210,      0,     82,    209,      0,      0 },
+    {      0,      0,     79,      0,     81,     80,      0,      0 },
+    {      0,      0,     39,      0,     55,      1,      1,      1 },
   },
   [2] = {
-    {      0,     84,     97,      0,     96,     95,      0,      0 },
-    {      0,     85,     94,      0,     93,     92,      0,      0 },
-    {      0,     86,     91,      0,     90,     89,      0,      0 },
-    {      0,     87,     88,      0,     99,     98,      0,      0 },
-    {      0,      0,      1,      0,      1,      1,      1,      1 },
     {      1,      0,      0,      0,      0,      0,      0,      0 },
     {      1,      0,      0,      0,      0,      0,      0,      0 },
     {      1,      0,      0,      0,      0,      0,      0,      0 },
     {      1,      0,      0,      0,      0,      0,      0,      0 },
     {      1,      1,      1,      0,      1,      1,      1,      1 },
+    {      0,     84,     97,      0,     96,     95,      0,      0 },
+    {      0,     85,     94,      0,     93,     92,      0,      0 },
+    {      0,     86,     91,      0,     90,     89,      0,      0 },
+    {      0,     87,     88,      0,     99,     98,      0,      0 },
+    {      0,      0,      1,      0,      1,      1,      1,      1 },
   },
   [3] = {
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,      0,      0,      0,      0,      0,      0 },
+    {      0,      0,      0,      0,      0,      0,      0,      0 },
+    {      0,      0,      0,      0,      0,      0,      0,      0 },
+    {      0,      0,      0,      0,      0,      0,      0,      0 },
+    {      0,      0,      0,      0,      0,      0,      0,      0 },
+    {      0,      0,      0,      0,      0,      0,      0,      0 },
     {      0,      0,   2608,   2607,   2096,   2049,      0,      0 },
-    {      0,      0,      0,      0,      0,      0,      0,      0 },
-    {      0,      0,      0,      0,      0,      0,      0,      0 },
-    {      0,      0,      0,      0,      0,      0,      0,      0 },
-    {      0,      0,      0,      0,      0,      0,      0,      0 },
-    {      0,      0,      0,      0,      0,      0,      0,      0 },
   },
 };
 // clang-format on
@@ -551,23 +551,34 @@ bool is_keyboard_left(void) {
 }
 
 
-// ボールの向きの補正は基板本来の左右で行う（keyball.cのkeyball_motion_is_left参照）。
-bool keyball_motion_is_left(void) {
+// このハーフが物理的な左手の基板か（kb_hid.cのGET_BALL_SIDE用）。is_keyboard_left()は
+// 「ボール側＝左」に上書きしているため、基板本来の判定を返す。
+bool kb_this_side_is_physical_left(void) {
     if (g_hw_is_left < 0) {
         g_hw_is_left = is_keyboard_left_impl();
     }
     return (bool)g_hw_is_left;
 }
 
+// ボールの向きの補正（符号の反転）を行う基板か（keyball.cのkeyball_motion_is_left参照）。
+// 反転が必要なのは物理的な右手の基板（v0.4.x以前の判定で「左」になっていた側。実機で
+// 確認済みの動きを変えないため、v0.5.0で判定が物理と一致した後もこの基板で反転する）。
+bool keyball_motion_is_left(void) {
+    if (g_hw_is_left < 0) {
+        g_hw_is_left = is_keyboard_left_impl();
+    }
+    return !(bool)g_hw_is_left;
+}
+
 #ifdef RGB_MATRIX_ENABLE
 // ボールが物理的に左手側の基板にあるか。g_led_config.pointのx座標は「ボール搭載側」基準で
 // 固定のため、ボールの位置が変わるとジェスチャーウェーブの左右の向きが逆になる。その補正に使う
 // （rgb_matrix_user.inc。2026-10-08、Keyball+の左手ボールで発覚した不具合と同じ対処）。
-// 【注意】基板本来のis_keyboard_left()（g_hw_is_left）は物理的な左右と逆。QMK 2024年の
-// 仕様変更（#22775）で交差点短絡=右になったが、Keyballの基板は左手側を短絡させる設計のため。
-// よって「ボールがis_keyboard_left()=真の基板にある」＝物理的には右手ボール。
-static bool g_ball_on_hw_left = false;  // 判定前はLED座標表を作った構成（左手ボール）として扱う
-bool kb_ball_on_physical_left(void) { return !g_ball_on_hw_left; }
+// 基板本来のis_keyboard_left()（g_hw_is_left）は、v0.5.0（2026-10-20）から物理的な左右と一致する
+// （config.hのSPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT。それ以前はQMK 2024年の仕様変更#22775の影響で
+// 物理と逆だった）。よって「ボールがis_keyboard_left()=真の基板にある」＝左手ボール。
+static bool g_ball_on_hw_left = true;  // 判定前はLED座標表を作った構成（左手ボール）として扱う
+bool kb_ball_on_physical_left(void) { return g_ball_on_hw_left; }
 
 // 上記(2)の対処。「ボール搭載側の基板が、本来の意味でのis_keyboard_left()=false側
 // だったか」を判定し、そうであればg_led_config.matrix_coの行0-3⇔4-7を入れ替える。
@@ -589,6 +600,9 @@ static void kb_fixup_led_matrix_rows_if_needed(void) {
 #endif
 
 void keyboard_post_init_user(void) {
+    // v0.4.x以前の左右逆の並びで保存されたキーマップを、初回起動時に新しい並びへ入れ替える
+    // （kb_settings.h末尾参照。キーを読む前に済ませる）。
+    kb_row_order_migrate();
 #ifdef CONSOLE_ENABLE
     // 2026-09-09、原因調査用の一時的なデバッグ出力（qmk consoleで確認）。
     debug_enable = true;
@@ -907,7 +921,8 @@ void oledkit_render_logo_user(void) {
     static bool was_handled = false;
     bool        handled     = false;
 #if defined(RGB_MATRIX_ENABLE) && defined(RGB_MATRIX_CUSTOM_USER)
-    switch (rgb_matrix_get_mode()) {
+    // Keyball LinkでOLEDのアニメーションをOFFにした時は、どのエフェクトでも止まったロゴにする（v0.5.2〜）
+    switch (keyball.oled_anim_off ? RGB_MATRIX_NONE : rgb_matrix_get_mode()) {
         case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
         case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(&anim_hallow); handled = true; break;
         case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(&anim_easter); handled = true; break;
@@ -948,6 +963,8 @@ void oledkit_render_logo_user(void) {
         } else {
             swing = (int16_t)(AMPLITUDE - (int32_t)(t - PERIOD_MS / 2) * (2 * AMPLITUDE) / (PERIOD_MS / 2));
         }
+        // Keyball LinkでアニメーションをOFFにした時はロゴも揺らさず、元の静止位置に表示する（v0.5.3〜）
+        if (keyball.oled_anim_off) swing = 0;
         uint8_t margin = (uint8_t)(BASE_MARGIN + swing);
 
         char ch = 0x80;

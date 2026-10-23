@@ -1,0 +1,17 @@
+diff --git a/quantum/rgb_matrix/rgb_matrix.c b/quantum/rgb_matrix/rgb_matrix.c
+index ab0aa17512..d955c2ae35 100644
+--- a/quantum/rgb_matrix/rgb_matrix.c
++++ b/quantum/rgb_matrix/rgb_matrix.c
+@@ -158,7 +158,12 @@ __attribute__((weak)) int rgb_matrix_led_index(int index) {
+     return index;
+ }
+ 
++// keyball: エフェクトが各LEDに書き込む色を、書き込む直前に加工するための差し込み口
++// （起動演出から設定したエフェクトへ溶け込むように切り替えるため。既定は何もしない）
++__attribute__((weak)) void rgb_matrix_color_filter_kb(int index, uint8_t *red, uint8_t *green, uint8_t *blue) {}
++
+ void rgb_matrix_set_color(int index, uint8_t red, uint8_t green, uint8_t blue) {
++    rgb_matrix_color_filter_kb(index, &red, &green, &blue);
+     rgb_matrix_driver.set_color(rgb_matrix_led_index(index), red, green, blue);
+ }
+ 

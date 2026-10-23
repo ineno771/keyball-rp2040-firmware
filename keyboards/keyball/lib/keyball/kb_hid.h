@@ -61,6 +61,11 @@
 #define KB_HID_CMD_SET_GESTURE_WAVE_STYLE 0x32  // ジェスチャー連動LEDウェーブの見た目変更
 #define KB_HID_CMD_GET_GESTURE_WAVE_COLOR 0x33  // ジェスチャー連動LEDウェーブ専用の色(hue,sat,val)取得
 #define KB_HID_CMD_SET_GESTURE_WAVE_COLOR 0x34  // ジェスチャー連動LEDウェーブ専用の色変更
+#define KB_HID_CMD_GET_BALL_SIDE          0x35  // ボールが物理的に左右どちらの基板にあるか取得（v0.5.1〜）
+#define KB_HID_CMD_GET_OLED_ANIM          0x36  // OLEDのアニメーション（LEDエフェクト連動）のON/OFF取得（v0.5.2〜）
+#define KB_HID_CMD_SET_OLED_ANIM          0x37  // OLEDのアニメーションのON/OFF変更（EEPROMに保存し、スレーブへも送る）
+#define KB_HID_CMD_GET_BOOT_ANIM          0x38  // 起動アニメーションのON/OFF取得（v0.5.7〜）
+#define KB_HID_CMD_SET_BOOT_ANIM          0x39  // 起動アニメーションのON/OFF変更（次の起動から反映）
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
