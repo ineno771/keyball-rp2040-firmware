@@ -8,7 +8,7 @@
 
 | 呼び方 | 中身 |
 |---|---|
-| **本番** | https://keyball-link.shiroganelab.com （keyball-configuratorの`main`ブランチから`npm run deploy`。一般公開） |
+| **本番** | https://keyball-link.shiroganelab.com （keyball-linkの`main`ブランチから`npm run deploy`。一般公開） |
 | **開発** | https://rp2040.keyball-link.pages.dev （`rp2040`ブランチから`npm run deploy`。本人の実機確認用・非公開） |
 | **AVR版** | .hexのファームウェア（Keyball39/44/61/+、通常版とLED版）。本番で配布中 |
 | **RP2040版** | .uf2のファームウェア（Keyball39/44/61/+、keyball-rp2040-firmware）。2026-10-09から本番でも公開（`RP2040_PUBLIC_RELEASE=true`） |
@@ -16,7 +16,7 @@
 報告例: 「RP2040版 v0.4.4を開発に反映（本番には未掲載）」。GitHubへのpushは本番・開発のどちらにも反映されないバックアップなので、別物として書く。
 
 ## ★2026-10-23 追記（最新。下の「最新状況」より優先）
-- **v0.5.8を本番公開**（2026-10-23）。内容と経緯の詳細は[keyball-configurator（keyball-link）のHANDOFF.md「★最新状況」](https://github.com/Yowkees/keyball-link/blob/main/HANDOFF.md)を参照。要点:
+- **v0.5.8を本番公開**（2026-10-23）。内容と経緯の詳細は[keyball-linkのHANDOFF.md「★最新状況」](https://github.com/Yowkees/keyball-link/blob/main/HANDOFF.md)を参照。要点:
   - **左右判定の根本修正**（v0.5.0）: 全機種の`config.h`に`SPLIT_HAND_MATRIX_GRID_LOW_IS_LEFT`。キーマップの行0〜(半分-1)＝物理的な左手になった。初期キーマップも入れ替え済み。保存済みキーマップは`kb_settings.c`の`kb_row_order_migrate()`で初回起動時に自動移行（EEPROM 0x0AEE-0x0B0F）。ボールの向き・ウェーブ左右は今までと同じ動きになるよう書き換え済み。
   - v0.5.1 ボールの左右をKeyball Linkへ返すHID 0x35。v0.5.2/0.5.3 OLEDアニメON/OFF（0x36/0x37、EEPROM 0x0B10、OFFでロゴも静止）。v0.5.4 起動演出→設定表示へ0.5秒で溶け込み（**QMKパッチ`patches/0004`が必要**）。v0.5.5 起動待ち短縮→トラックボール停止で**v0.5.6で取り消し**（接続まわりのタイミングは触らない）。v0.5.7/0.5.8 起動アニメON/OFF（0x38/0x39、EEPROM 0x0B11、OFFでも左右がつながってから同時に開始）。
   - 設定をスレーブへ伝える時は`KEYBALL_SET_CPI`のflagsに相乗り（新しいRPCは作らない）。EEPROMの次の空きは0x0B12。
@@ -27,7 +27,7 @@
 ### いまの状態
 - **本番**（https://keyball-link.shiroganelab.com）でRP2040版を公開中（2026-10-09〜）。公開スイッチ`RP2040_PUBLIC_RELEASE`はmain・rp2040ブランチとも`true`。mainとrp2040は同じ内容で、都度`git merge --no-ff main`で同期する。
 - **最新バージョン**: RP2040版 **v0.4.28**（39/44/61/+）、AVR版 **v1.4.2**（39/44/61）・**v1.1.1**（Keyball+）。
-- **反映の手順**（keyball-configurator）: ①ファームを編集したら`npm run update-firmware`（全AVR 8本＋RP2040 4本をビルドし`public/firmware`へ配置・整合性チェック）②mainでコミット ③`git checkout rp2040 && git merge --no-ff main` → `npm run deploy`で**開発**へ ④本人の実機確認後、mainで`npm run deploy`して**本番**へ ⑤`git push`（本番・開発どちらにも反映されないバックアップ。pushは本人の指示があった時だけ）。
+- **反映の手順**（keyball-link）: ①ファームを編集したら`npm run update-firmware`（全AVR 8本＋RP2040 4本をビルドし`public/firmware`へ配置・整合性チェック）②mainでコミット ③`git checkout rp2040 && git merge --no-ff main` → `npm run deploy`で**開発**へ ④本人の実機確認後、mainで`npm run deploy`して**本番**へ ⑤`git push`（本番・開発どちらにも反映されないバックアップ。pushは本人の指示があった時だけ）。
 - **RP2040ファームの編集場所**は`~/keyball-rp2040-firmware`。ビルドは`npm run update-firmware`が`~/qmk_firmware-keyball-rp2040`へ同期してから行う。バージョンは`keyboards/keyball/lib/keyball/kb_version.h`と、Keyball Linkの`src/lib/firmwareFeatures.ts`の`LATEST_FW_VERSION_RP2040`を必ず両方上げる。
 
 ### 必ず知っておくこと（重要な仕様・落とし穴）
@@ -77,7 +77,7 @@
 - **RP2040の大容量フラッシュを活かした将来機能案**（本人からのアイデア、まだ未着手）: RGB_MATRIXへの移行、マクロ・設定の大容量化。トラックボールジェスチャー機能の強化・LEDパターンの増設は、以下の個別項目として詳細化済み（2026-08-25）。
 - **トラックボール「矢印キーモード」（達成済み・2026-09-10）**: トラックボールが回転している間、その方向のキーが入力されるモード。「回転速度に応じて連続入力される」という決定済み仕様は、複数ジェスチャーモードの方向ごとの「連続入力」に矢印キーを割り当てることで実現済み（本人確認）。専用機能としては実装していないが、既存の複数ジェスチャーモードで目的を達成したため個別実装は不要と判断。
 - **トラックボール「超低速（精密作業）モード」（実装済み・2026-08-25）**: 新規キーコード`PRC_MO`（`keyball.h`）を押している間、CPIを分周値（既定4、範囲2-20、`kb_precision_div_get/set`でEEPROM保存）で割って移動量を下げる。離すと元のCPIに復帰。
-  - 分周値はKeyball Linkから調整できるよう、新規HIDコマンド`KB_HID_CMD_GET_PRECISION`(0x18)/`KB_HID_CMD_SET_PRECISION`(0x19)を追加済み（`kb_hid.h`/`kb_hid.c`）。**Keyball Link側のUI実装も完了済み**（`~/keyball-configurator`のSettingsTab、コミット`935d441`ほか）。
+  - 分周値はKeyball Linkから調整できるよう、新規HIDコマンド`KB_HID_CMD_GET_PRECISION`(0x18)/`KB_HID_CMD_SET_PRECISION`(0x19)を追加済み（`kb_hid.h`/`kb_hid.c`）。**Keyball Link側のUI実装も完了済み**（`~/keyball-link`のSettingsTab、コミット`935d441`ほか）。
   - `PRC_MO`はデフォルトのキーマップ配列には未割り当て。Keyball Linkのキー割り当てUIから任意のキーに割り当てる運用。
   - ビルド確認済み（フラッシュ+432バイト、RP2040なので問題なし）。実機動作確認はこれから。
 - **移動方向矯正（軸スナップ）モード構想（アイデア段階、未着手）**: 対応キー（例: Shift）を押しながらトラックボールを回転させると、上下・左右・斜め45度の直線的な移動のみに制限されるモード。デザインツールのShift+ドラッグと同様の挙動を想定。
@@ -217,7 +217,7 @@
 ### 2026-09-18（続き）: タイピングヒートマップ「赤くなる早さ」を調整可能に
 - 本人「タイピングヒートマップのどれだけのタイピングで赤くなるかの早さ調整をできるようにしてください」との要望。
 - [x] **新規EEPROM等を追加せず、既存の「速度」スライダー(`rgb_matrix_config.speed`、標準RGB_MATRIX機能で元々全エフェクト共通で同期・永続化されている値)を転用**した。`HEATMAP()`内で1打鍵あたりの熱量増加を固定値32ではなく`HEATMAP_INCREASE_MIN(4)`〜`HEATMAP_INCREASE_MAX(128)`の範囲でspeedから線形計算するよう変更（`rgb_matrix_user.inc`、keyball39/keyballplus両方）。速度を右に振るほど少ない打鍵数で赤くなる。
-- [x] Web UI側（`keyball-configurator`）: `LED_NO_SPEED_EFFECT_IDS`からタイピングヒートマップ(15)を除外し、LED設定画面でこのエフェクト選択時に「速度」スライダーが表示されるようにした（`src/lib/protocol.ts`）。ビルド確認・`rp2040-dev`プレビューへデプロイ済み。
+- [x] Web UI側（`keyball-link`）: `LED_NO_SPEED_EFFECT_IDS`からタイピングヒートマップ(15)を除外し、LED設定画面でこのエフェクト選択時に「速度」スライダーが表示されるようにした（`src/lib/protocol.ts`）。ビルド確認・`rp2040-dev`プレビューへデプロイ済み。
 - `qmk compile`成功（keyball39・keyballplus両方）。**実機での確認はまだ**。
 
 ### 2026-09-18（続き2）: 「ファームウェアを書き直すとトラックボール設定がリセットされる」原因調査・修正
@@ -318,7 +318,7 @@
   - **`TRACKBALL_BREATH`をGESTURE_WAVEと全く同じ発火の仕組み（トリガー元・6スロットの管理）を共有する「もう一つの見た目」に再設計**（①）。Web UIのLED_EFFECTS一覧からは削除し、GESTURE_WAVEと同様に選択式エフェクトではなくした。
   - **新設定「ジェスチャー連動LEDウェーブの見た目」を追加**（本人が「既存のシャープな見た目と新しい柔らかい見た目のどちらも選べるようにする」を選択）。`kb_gesture_wave_style_get/set()`（`kb_settings.h/c`、EEPROM `0x0AB1`、既定0=シャープ）と、新HIDコマンド`KB_HID_CMD_GET/SET_GESTURE_WAVE_STYLE`(0x31/0x32、`kb_hid.h/c`)で追加。`keyball_gesture_wave_task()`はこの設定に応じて`RGB_MATRIX_CUSTOM_GESTURE_WAVE`（シャープ）/`RGB_MATRIX_CUSTOM_TRACKBALL_BREATH`（ブリージング）のどちらへ強制切り替えするかを選ぶ。
   - `TRACKBALL_BREATH`の見た目自体（輪郭が2乗カーブで柔らかい・三角波でフェードイン/アウトする「呼吸」）は1回目の実装から変更なし。速さはGESTURE_WAVE(200〜900ms)よりゆっくり（800〜2200ms）。この式は`keyball.c`の`gesture_wave_duration_ms()`と`rgb_matrix_user.inc`の`TRACKBALL_BREATH()`の両方に同じ値で存在するので、片方だけ変更するとスロットの後片付けタイミングと表示時間がズレるため、変更時は両方揃えること。
-  - Web側（`~/keyball-configurator`）: `LED_EFFECTS`から`{id:19}`を削除。`GestureCard.tsx`のジェスチャーウェーブ設定に「見た目」セレクトを追加（`gestureWaveStyle`/`onGestureWaveStyleChange`、`hid.ts`/`useKeyball.ts`/`TrackballSettingsTab.tsx`/`App.tsx`まで配線。プリセットの書き出し/読み込みにも対応）。
+  - Web側（`~/keyball-link`）: `LED_EFFECTS`から`{id:19}`を削除。`GestureCard.tsx`のジェスチャーウェーブ設定に「見た目」セレクトを追加（`gestureWaveStyle`/`onGestureWaveStyleChange`、`hid.ts`/`useKeyball.ts`/`TrackballSettingsTab.tsx`/`App.tsx`まで配線。プリセットの書き出し/読み込みにも対応）。
 - **追加要望「明るさは明るく、彩度は少し落として」→ さらに「色相・彩度・明るさも個別に調整したい」**: 最初はTWINKLEと同じ「boostが強いほど彩度を落とし明るさを255へ近づける」自動演出で対応したが、続けて本人から「色相・彩度・明るさも自分で調整できるようにしてほしい」との要望があり、ジェスチャーウェーブ専用の色設定を新設。
   - `kb_settings.h/c`: `kb_gesture_wave_color_get/set()`を追加。hue/sat/valは0-255全域が有効値のため、DPIカーブと同じ「専用マジックバイト（`KB_GESTURE_WAVE_COLOR_MAGIC_EEPROM` 0x0AB5、値0xC7）で保存済みか判定」方式にした（RP2040のEEPROMは未書込みが0x00になるため、通常の「範囲外なら未設定」判定が使えない）。EEPROM `0x0AB2-0x0AB4`（hue,sat,val）。既定はhue=0・sat=255・val=255。
   - `keyball.h`/`keyball.c`: 速度と同じ理由（分割両ハーフはそれぞれ別のEEPROMを持つ）で、`keyball_t`に`gesture_wave_hue/sat/val`を追加し、発火のたびにマスターが読んだ値をRPC(`gesture_wave_rpc_t`にhue/sat/valを追加)でスレーブにも配る。
@@ -338,7 +338,7 @@
   - **連続フリック時の上書き挙動を一時的に変更→撤回**: 「何度もフリックした時はどんどんエフェクトを上書きしていくようにしてほしい」との依頼を受け`keyball_gesture_wave_trigger()`の「既存スロットがactiveなら次の発火を無視する」ガードを一度削除したが、直後に本人から「やっぱり連続フリックの上書きは無しでお願いします」と撤回依頼があり、**元のガード（前のウェーブ表示中は次の発火を無視する）に戻した**。今後同じ提案をしても一度試して不採用になった経緯として記録。
 - `qmk compile`（keyball39・keyballplus）・`npm run update-firmware`いずれも成功。
 - **本人が実機で動作確認し「動作確認OKでした」と確認済み**（2026-09-30）。シャープ・ブリージング両方の見た目、左右/上下ジェスチャー、連続フリック時に前のウェーブが終わるまで次が発動しない挙動、いずれも問題なし。
-- **未コミット**。次回このセッションに引き継ぐ場合、本人にコミット・push可否を確認してから実行すること。あわせて`~/keyball-configurator/src/components/FirmwareFlasher/FirmwareFlasher.tsx`の`RP2040_PUBLIC_RELEASE`が実機確認用に一時的に`true`のままになっている点も、本番デプロイ前に`false`へ戻す必要がある。
+- **未コミット**。次回このセッションに引き継ぐ場合、本人にコミット・push可否を確認してから実行すること。あわせて`~/keyball-link/src/components/FirmwareFlasher/FirmwareFlasher.tsx`の`RP2040_PUBLIC_RELEASE`が実機確認用に一時的に`true`のままになっている点も、本番デプロイ前に`false`へ戻す必要がある。
 
 ### 2026-09-30〜2026-10-02: ジェスチャーウェーブのモード別設定・OLEDアニメーション刷新・アンダーグロー修正（v0.2.0〜v0.4.4、実機確認OK・コミット済み）
 - 上の2026-09-29エントリの内容はv0.2.0としてコミット・デプロイ済み（「未コミット」の記載は解消）。`RP2040_PUBLIC_RELEASE`は`rp2040`ブランチでは常に`true`、`main`では`false`の運用（configurator側）。
@@ -420,7 +420,7 @@
 ---
 
 ## 6. ビルド環境（このデバイス）
-- **2026-10-02時点の実際のビルドツリーは`~/qmk_firmware-keyball-rp2040`（git worktree）**。`~/qmk_firmware`はv0.1.0のまま止まった古いツリーなので使わないこと。以下の手順中の`~/qmk_firmware`は読み替える。ビルド後は`~/qmk_firmware-keyball-rp2040/*.uf2`を`~/keyball-configurator/public/firmware/`へコピーする。
+- **2026-10-02時点の実際のビルドツリーは`~/qmk_firmware-keyball-rp2040`（git worktree）**。`~/qmk_firmware`はv0.1.0のまま止まった古いツリーなので使わないこと。以下の手順中の`~/qmk_firmware`は読み替える。ビルド後は`~/qmk_firmware-keyball-rp2040/*.uf2`を`~/keyball-link/public/firmware/`へコピーする。
 - QMK Firmware本体: `~/qmk_firmware`（ベースコミット`594558ec7b9ac1963870447778426682065e0d20`、2つのパッチ適用済み）
 - RP2040向けビルドに必要な `arm-none-eabi-gcc` は `brew`（`osx-cross/arm` tap）でインストール・修復済み。
 - ビルド時は毎回、`keyboards/keyball` 一式を `~/keyball-rp2040-firmware` から `~/qmk_firmware/keyboards/` にコピーしてから `qmk compile -kb keyball/keyball39 -km web_configurator` を実行する運用（keyball-plus-firmwareと同じパターン）。
