@@ -108,7 +108,8 @@ void    kb_gesture_th_v_set(uint8_t v);
 //   0x0AE6-0x0AEB ウェーブの色（2モード×3バイト）  0x0AEC-0x0AED 色の保存済み目印
 // 全機種共通の番地（キーマップ領域との衝突は冒頭の_Static_assertで検査済み、EEPROMは
 // 0x0000-0x0FFFの4096バイト）。0x0AEE-0x0B0Fはキーマップの左右の並びの移行（本ファイル末尾）が使用。
-// 0x0B10はOLEDアニメ、0x0B11は起動アニメのON/OFF（本ファイル末尾）。次にここへ設定を追加する場合は0x0B12から。
+// 0x0B10はOLEDアニメ、0x0B11は起動アニメのON/OFF、0x0B12-0x0C63は設定の世代・OSに合わせる・名前（本ファイル末尾）。
+// 次にここへ設定を追加する場合は0x0C64から。
 #define KB_GESTURE_MODE_LEGACY_COUNT        4
 #define KB_GESTURE_MODE_EXT_TABLE_EEPROM    0x0ACE
 #define KB_GESTURE_WAVE_SPEED_EXT_EEPROM    0x0AE2
@@ -481,3 +482,44 @@ void kb_oled_anim_enabled_set(bool enabled);
 #define KB_BOOT_ANIM_OFF_VALUE 0x01
 bool kb_boot_anim_enabled_get(void);
 void kb_boot_anim_enabled_set(bool enabled);
+
+// ── 設定の世代（2026-11-04、v0.6.0）──────────────────────────────────────
+// 初期設定を変えても、今使っている人の動きが変わらないようにするための目印。
+// EEPROMを初期化した時（新しく使い始める・Keyball Linkで初期化）にだけ新しい初期設定を
+// 書き込み、目印をKB_DEFAULTS_GEN_CURRENTにする。目印が無いまま起動した＝前のファームから
+// 更新した人で、その時は「前の初期設定のまま」になるよう、変えた項目だけ前の値で固定する。
+//   世代2（v0.6.0）で変えたもの: ジェスチャー5・6の初期の割り当て（前は「なし」）、
+//   画面切り替えをOSに合わせる（新しい人はON、更新した人はOFF）、ジェスチャーの初期の名前
+#define KB_DEFAULTS_GEN_EEPROM  0x0B12
+#define KB_DEFAULTS_GEN_CURRENT 0x02
+// EEPROMを初期化した時に呼ぶ（eeconfig_init_user）。
+void kb_defaults_init_new(void);
+// 起動時に一度呼ぶ（keyboard_post_init_user）。前のファームから更新した時だけ働く。
+void kb_defaults_migrate(void);
+
+// ── 画面切り替えのジェスチャーをOSに合わせる（2026-11-04、v0.6.0）─────────────
+// ONで接続先がWindowsの時、ジェスチャーで送るCtrl+矢印（Macの画面切り替え）を
+// Windowsの画面切り替えに置き換える: Ctrl+←/→→Win+Ctrl+←/→、Ctrl+↑→Win+Tab、Ctrl+↓→Win+D。
+// 1バイト。KB_GESTURE_OS_ADAPT_ON_VALUEの時だけON（未書込みの0x00/0xFFはOFF＝前のファームと同じ動き）。
+#define KB_GESTURE_OS_ADAPT_EEPROM   0x0B13
+#define KB_GESTURE_OS_ADAPT_ON_VALUE 0xA1
+bool     kb_gesture_os_adapt_get(void);
+void     kb_gesture_os_adapt_set(bool on);
+// ジェスチャーで送るキーを、設定と接続先のOSに合わせて置き換える
+uint16_t kb_gesture_os_adapt(uint16_t kc);
+
+// ── レイヤー・ジェスチャーの名前（2026-11-04、v0.6.0）────────────────────────
+// Keyball Linkで表示する名前。UTF-8で1つ24バイトまで（日本語なら8文字）。0x00か0xFFで終わり。
+// 未書込み（全部0x00）は名前なし＝Keyball Linkが「レイヤー1」「ジェスチャー1」のように番号で表示する。
+#define KB_NAME_LEN            24
+#define KB_NAME_KIND_LAYER     0
+#define KB_NAME_KIND_GESTURE   1
+#define KB_LAYER_NAME_COUNT    8
+#define KB_GESTURE_NAME_COUNT  6
+#define KB_LAYER_NAME_EEPROM   0x0B14
+#define KB_GESTURE_NAME_EEPROM (KB_LAYER_NAME_EEPROM + KB_LAYER_NAME_COUNT * KB_NAME_LEN)  // 0x0BD4
+_Static_assert(KB_GESTURE_NAME_EEPROM + KB_GESTURE_NAME_COUNT * KB_NAME_LEN <= 0x1000, "名前の保存場所がEEPROMに収まりません");
+// 名前を読む（buf はKB_NAME_LENバイト）。種類・番号が範囲外ならfalse
+bool kb_name_get(uint8_t kind, uint8_t idx, uint8_t *buf);
+// 名前を書く（lenバイト。足りない分は0で埋める）。種類・番号が範囲外ならfalse
+bool kb_name_set(uint8_t kind, uint8_t idx, const uint8_t *buf, uint8_t len);

@@ -66,6 +66,10 @@
 #define KB_HID_CMD_SET_OLED_ANIM          0x37  // OLEDのアニメーションのON/OFF変更（EEPROMに保存し、スレーブへも送る）
 #define KB_HID_CMD_GET_BOOT_ANIM          0x38  // 起動アニメーションのON/OFF取得（v0.5.7〜）
 #define KB_HID_CMD_SET_BOOT_ANIM          0x39  // 起動アニメーションのON/OFF変更（次の起動から反映）
+#define KB_HID_CMD_GET_NAME               0x3A  // レイヤー・ジェスチャーの名前取得（v0.6.0〜）
+#define KB_HID_CMD_SET_NAME               0x3B  // レイヤー・ジェスチャーの名前変更（v0.6.0〜）
+#define KB_HID_CMD_GET_GESTURE_OS_ADAPT   0x3C  // 画面切り替えのジェスチャーをOSに合わせるか取得（v0.6.0〜）
+#define KB_HID_CMD_SET_GESTURE_OS_ADAPT   0x3D  // 同 変更
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00

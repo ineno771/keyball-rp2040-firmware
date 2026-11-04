@@ -937,6 +937,37 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
         }
 #endif // LED_VERSION_BUILD
 
+        // 0x3A: レイヤー・ジェスチャーの名前を返す
+        // 要求: [cmd, kind(0=レイヤー 1=ジェスチャー), idx]  応答: [cmd, status, 名前24バイト]
+        case KB_HID_CMD_GET_NAME: {
+            response[1] = kb_name_get(data[1], data[2], &response[2]) ? KB_HID_STATUS_OK : KB_HID_STATUS_ERROR;
+            break;
+        }
+
+        // 0x3B: レイヤー・ジェスチャーの名前を変更する
+        // 要求: [cmd, kind, idx, len(0-24), 名前lenバイト]  応答: [cmd, status]
+        case KB_HID_CMD_SET_NAME: {
+            uint8_t len = data[3] > KB_NAME_LEN ? KB_NAME_LEN : data[3];
+            response[1] = kb_name_set(data[1], data[2], &data[4], len) ? KB_HID_STATUS_OK : KB_HID_STATUS_ERROR;
+            break;
+        }
+
+        // 0x3C: 画面切り替えのジェスチャーをOSに合わせるかを返す
+        // 応答: [cmd, on(0/1), status]
+        case KB_HID_CMD_GET_GESTURE_OS_ADAPT: {
+            response[1] = kb_gesture_os_adapt_get() ? 1 : 0;
+            response[2] = KB_HID_STATUS_OK;
+            break;
+        }
+
+        // 0x3D: 画面切り替えのジェスチャーをOSに合わせるかを変更する
+        // 要求: [cmd, on(0/1)]  応答: [cmd, status]
+        case KB_HID_CMD_SET_GESTURE_OS_ADAPT: {
+            kb_gesture_os_adapt_set(data[1] != 0);
+            response[1] = KB_HID_STATUS_OK;
+            break;
+        }
+
         default:
             response[0] = 0xFF;
             response[1] = KB_HID_STATUS_ERROR;

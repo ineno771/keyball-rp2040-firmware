@@ -9,6 +9,9 @@
 #include "matrix.h"
 #include <stdbool.h>
 #include <string.h>
+#ifdef OS_DETECTION_ENABLE
+#    include "os_detection.h"
+#endif
 
 // 注意: KB_LAYER_LED_TABLE_EEPROM (0x09E7) 〜 +42バイト(0x0A10)は、既存のscroll/gesture/
 // precision layer設定（0x09E0-0x09E5）に続く「空き領域」として使っている。
@@ -144,9 +147,12 @@ static const kb_gesture_mode_t kb_gesture_mode_defaults[KB_GESTURE_MODE_COUNT] =
     {.key = {KC_UP, KC_DOWN, KC_LEFT, KC_RIGHT}, .continuous = 0x0F},
     // ジェスチャー4: 上=Enter、下=Backspace、左=かな、右=英数
     {.key = {KC_ENTER, KC_BACKSPACE, KC_LNG1, KC_LNG2}, .continuous = 0},
-    // ジェスチャー5・6（2026-10-09追加）: 既定の割り当てなし
-    {.key = {0, 0, 0, 0}, .continuous = 0},
-    {.key = {0, 0, 0, 0}, .continuous = 0},
+    // ジェスチャー5: ブラウザ。上下でページ送り（連続入力ON）、左右で前・次のタブ
+    // （2026-11-04、v0.6.0。それまでは割り当てなし。前のファームから更新した人は
+    // kb_defaults_migrate()で「なし」のまま固定する）
+    {.key = {KC_PAGE_UP, KC_PAGE_DOWN, LCTL(LSFT(KC_TAB)), LCTL(KC_TAB)}, .continuous = 0x03},
+    // ジェスチャー6: 音楽・動画。上=再生/一時停止、下=ミュート、左右=前・次の曲（同上）
+    {.key = {KC_MEDIA_PLAY_PAUSE, KC_AUDIO_MUTE, KC_MEDIA_PREV_TRACK, KC_MEDIA_NEXT_TRACK}, .continuous = 0},
 };
 
 // モードごとの保存先。モード1〜4は従来の番地、5・6は追加領域（kb_settings.h参照）。
@@ -837,6 +843,7 @@ void kb_row_order_mark_done(void) {
 // QMKがEEPROMを初期化した直後（初期キーマップを書いた後）に呼ばれる。
 void eeconfig_init_user(void) {
     kb_row_order_mark_done();
+    kb_defaults_init_new();
 }
 
 void kb_row_order_migrate(void) {
@@ -892,4 +899,94 @@ bool kb_boot_anim_enabled_get(void) {
 
 void kb_boot_anim_enabled_set(bool enabled) {
     eeprom_update_byte((uint8_t *)(uintptr_t)KB_BOOT_ANIM_EEPROM, enabled ? 0x00 : KB_BOOT_ANIM_OFF_VALUE);
+}
+
+// ── 設定の世代・画面切り替えをOSに合わせる・名前（kb_settings.h末尾参照）──────────
+// 新しく使い始める人のジェスチャーの初期の名前（UTF-8、24バイトまで）
+static const char *const kb_gesture_default_names[KB_GESTURE_NAME_COUNT] = {
+    "画面切り替え", "音量・明るさ", "矢印キー", "文字入力", "ブラウザ", "音楽・動画",
+};
+
+void kb_defaults_init_new(void) {
+    for (uint8_t i = 0; i < KB_GESTURE_NAME_COUNT; i++) {
+        const char *n = kb_gesture_default_names[i];
+        kb_name_set(KB_NAME_KIND_GESTURE, i, (const uint8_t *)n, (uint8_t)strlen(n));
+    }
+    kb_gesture_os_adapt_set(true);
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_DEFAULTS_GEN_EEPROM, KB_DEFAULTS_GEN_CURRENT);
+}
+
+void kb_defaults_migrate(void) {
+    if (eeprom_read_byte((const uint8_t *)(uintptr_t)KB_DEFAULTS_GEN_EEPROM) == KB_DEFAULTS_GEN_CURRENT) return;
+#ifdef GESTURE_ENABLE
+    // 前のファームから更新した人: 一度も保存していないジェスチャー5・6は、前の初期設定
+    // （割り当てなし）を書き込んで固定する（新しい初期設定で勝手に動き出さないように）
+    for (uint8_t i = KB_GESTURE_MODE_LEGACY_COUNT; i < KB_GESTURE_MODE_COUNT; i++) {
+        uint8_t buf[KB_GESTURE_MODE_ENTRY_SIZE];
+        eeprom_read_block(buf, (const void *)(uintptr_t)gesture_mode_addr(i), KB_GESTURE_MODE_ENTRY_SIZE);
+        bool all_zero = true, all_ff = true;
+        for (uint8_t b = 0; b < KB_GESTURE_MODE_ENTRY_SIZE; b++) {
+            if (buf[b] != 0x00) all_zero = false;
+            if (buf[b] != 0xFF) all_ff = false;
+        }
+        if (all_zero || all_ff) {
+            kb_gesture_mode_t none = {.key = {0, 0, 0, 0}, .continuous = 0, .layer = KB_LAYER_NONE};
+            kb_gesture_mode_set(i, &none);
+        }
+    }
+#endif
+    // 画面切り替えをOSに合わせる: 未書込み＝OFFのまま。名前: 未書込み＝番号表示のまま
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_DEFAULTS_GEN_EEPROM, KB_DEFAULTS_GEN_CURRENT);
+}
+
+static bool g_os_adapt_loaded = false;
+static bool g_os_adapt        = false;
+
+bool kb_gesture_os_adapt_get(void) {
+    if (!g_os_adapt_loaded) {
+        g_os_adapt        = eeprom_read_byte((const uint8_t *)(uintptr_t)KB_GESTURE_OS_ADAPT_EEPROM) == KB_GESTURE_OS_ADAPT_ON_VALUE;
+        g_os_adapt_loaded = true;
+    }
+    return g_os_adapt;
+}
+
+void kb_gesture_os_adapt_set(bool on) {
+    g_os_adapt        = on;
+    g_os_adapt_loaded = true;
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_GESTURE_OS_ADAPT_EEPROM, on ? KB_GESTURE_OS_ADAPT_ON_VALUE : 0x00);
+}
+
+uint16_t kb_gesture_os_adapt(uint16_t kc) {
+#ifdef OS_DETECTION_ENABLE
+    if (!kb_gesture_os_adapt_get() || detected_host_os() != OS_WINDOWS) return kc;
+    switch (kc) {
+        case LCTL(KC_LEFT):  return LGUI(LCTL(KC_LEFT));   // 左のデスクトップ
+        case LCTL(KC_RIGHT): return LGUI(LCTL(KC_RIGHT));  // 右のデスクトップ
+        case LCTL(KC_UP):    return LGUI(KC_TAB);          // タスクビュー（Mission Control相当）
+        case LCTL(KC_DOWN):  return LGUI(KC_D);            // デスクトップを表示
+    }
+#endif
+    return kc;
+}
+
+static uint16_t name_addr(uint8_t kind, uint8_t idx) {
+    if (kind == KB_NAME_KIND_LAYER && idx < KB_LAYER_NAME_COUNT) return (uint16_t)(KB_LAYER_NAME_EEPROM + (uint16_t)idx * KB_NAME_LEN);
+    if (kind == KB_NAME_KIND_GESTURE && idx < KB_GESTURE_NAME_COUNT) return (uint16_t)(KB_GESTURE_NAME_EEPROM + (uint16_t)idx * KB_NAME_LEN);
+    return 0;
+}
+
+bool kb_name_get(uint8_t kind, uint8_t idx, uint8_t *buf) {
+    uint16_t addr = name_addr(kind, idx);
+    if (!addr) return false;
+    eeprom_read_block(buf, (const void *)(uintptr_t)addr, KB_NAME_LEN);
+    return true;
+}
+
+bool kb_name_set(uint8_t kind, uint8_t idx, const uint8_t *buf, uint8_t len) {
+    uint16_t addr = name_addr(kind, idx);
+    if (!addr) return false;
+    uint8_t tmp[KB_NAME_LEN] = {0};
+    memcpy(tmp, buf, len > KB_NAME_LEN ? KB_NAME_LEN : len);
+    eeprom_update_block(tmp, (void *)(uintptr_t)addr, KB_NAME_LEN);
+    return true;
 }

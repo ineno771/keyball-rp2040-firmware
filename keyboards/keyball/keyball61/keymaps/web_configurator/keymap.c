@@ -603,6 +603,7 @@ void keyboard_post_init_user(void) {
     // v0.4.x以前の左右逆の並びで保存されたキーマップを、初回起動時に新しい並びへ入れ替える
     // （kb_settings.h末尾参照。キーを読む前に済ませる）。
     kb_row_order_migrate();
+    kb_defaults_migrate();  // 前のファームから更新した人の初期設定を固定（v0.6.0）
 #ifdef CONSOLE_ENABLE
     // 2026-09-09、原因調査用の一時的なデバッグ出力（qmk consoleで確認）。
     debug_enable = true;
@@ -776,7 +777,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             // してしまう。別レイヤーのジェスチャーの連続入力をOFFにしたら直った）。
             // そのためこの2キーだけは「連続入力」指定を無視し、常に単発扱いにする。
             bool              cont = ((m.continuous >> dir) & 1) && kc != SCRL_TO && kc != SCRL_MO;
-            if (kc) kb_fire_keycode(kc);
+            if (kc) kb_fire_keycode(kb_gesture_os_adapt(kc));  // Windowsでは画面切り替えを置き換える（設定でON時）
             // 2026-10-09: 未割当の方向（なし）でもウェーブは出す（本人希望。ジェスチャーが
             // 反応しているかを目で確認できるようにするため）。キーは送らない。
             keyball_gesture_wave_trigger(dir, (uint8_t)gst_mode);
