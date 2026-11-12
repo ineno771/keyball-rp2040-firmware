@@ -902,16 +902,9 @@ void kb_boot_anim_enabled_set(bool enabled) {
 }
 
 // ── 設定の世代・画面切り替えをOSに合わせる・名前（kb_settings.h末尾参照）──────────
-// 新しく使い始める人のジェスチャーの初期の名前（UTF-8、24バイトまで）
-static const char *const kb_gesture_default_names[KB_GESTURE_NAME_COUNT] = {
-    "画面切り替え", "音量・明るさ", "矢印キー", "文字入力", "ブラウザ", "音楽・動画",
-};
-
+// 2026-11-12: ジェスチャーの初期の名前は書かないことにした（本人希望）。名前は空のままで、
+// Keyball Linkでは「ジェスチャー1」〜「ジェスチャー6」と番号で表示する。
 void kb_defaults_init_new(void) {
-    for (uint8_t i = 0; i < KB_GESTURE_NAME_COUNT; i++) {
-        const char *n = kb_gesture_default_names[i];
-        kb_name_set(KB_NAME_KIND_GESTURE, i, (const uint8_t *)n, (uint8_t)strlen(n));
-    }
     kb_gesture_os_adapt_set(true);
     eeprom_update_byte((uint8_t *)(uintptr_t)KB_DEFAULTS_GEN_EEPROM, KB_DEFAULTS_GEN_CURRENT);
 }

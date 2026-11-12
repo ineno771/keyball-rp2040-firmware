@@ -489,7 +489,7 @@ void kb_boot_anim_enabled_set(bool enabled);
 // 書き込み、目印をKB_DEFAULTS_GEN_CURRENTにする。目印が無いまま起動した＝前のファームから
 // 更新した人で、その時は「前の初期設定のまま」になるよう、変えた項目だけ前の値で固定する。
 //   世代2（v0.6.0）で変えたもの: ジェスチャー5・6の初期の割り当て（前は「なし」）、
-//   画面切り替えをOSに合わせる（新しい人はON、更新した人はOFF）、ジェスチャーの初期の名前
+//   画面切り替えをOSに合わせる（新しい人はON、更新した人はOFF）。名前は初期値なし（2026-11-12〜）
 #define KB_DEFAULTS_GEN_EEPROM  0x0B12
 #define KB_DEFAULTS_GEN_CURRENT 0x02
 // EEPROMを初期化した時に呼ぶ（eeconfig_init_user）。
