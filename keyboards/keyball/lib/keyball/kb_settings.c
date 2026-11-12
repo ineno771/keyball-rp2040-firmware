@@ -904,8 +904,8 @@ void kb_boot_anim_enabled_set(bool enabled) {
 // ── 設定の世代・画面切り替えをOSに合わせる・名前（kb_settings.h末尾参照）──────────
 // 2026-11-12: ジェスチャーの初期の名前は書かないことにした（本人希望）。名前は空のままで、
 // Keyball Linkでは「ジェスチャー1」〜「ジェスチャー6」と番号で表示する。
+// 画面切り替えをOSに合わせるも、新しく使い始める人の初期設定はOFF（本人希望。消去直後の未書込み＝OFF）。
 void kb_defaults_init_new(void) {
-    kb_gesture_os_adapt_set(true);
     eeprom_update_byte((uint8_t *)(uintptr_t)KB_DEFAULTS_GEN_EEPROM, KB_DEFAULTS_GEN_CURRENT);
 }
 
