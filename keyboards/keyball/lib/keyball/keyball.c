@@ -1073,9 +1073,10 @@ void keyball_oled_render_ballinfo(void) {
     oled_write_P(PSTR(" \xC0\xC1"), false);
     oled_write_char('0' + keyball_get_scroll_div(), false);
 
-    // 慣性スクロールのデバッグ表示（一時的）: 現在滑走中かどうか
-    oled_write_P(PSTR(" "), false);
-    oled_write_char((g_scroll_inertia[0].coasting || g_scroll_inertia[1].coasting) ? 'C' : '.', false);
+    // 2026-11-13: 慣性スクロールの確認用に一時的に出していた「 .」（滑走中は「 C」）を削除した。
+    // この行は21文字ちょうどで、2文字足すと画面の幅からはみ出し、下の行が右にずれていた。
+    // さらに最後の行のはみ出し（AMLの時間の「50」）が1行目の先頭に回り込み、「Key」が「50y」に
+    // 見えていた。この行に文字を足す時は、21文字に収まるか必ず数えること。
 #endif
 }
 
