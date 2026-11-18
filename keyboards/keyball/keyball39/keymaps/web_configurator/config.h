@@ -76,7 +76,7 @@
 #define RGBLIGHT_EFFECT_ALTERNATING
 
 // デフォルト設定
-#define RGBLIGHT_DEFAULT_MODE RGBLIGHT_MODE_BREATHING
+#define RGBLIGHT_DEFAULT_MODE RGBLIGHT_MODE_STATIC_LIGHT  // 初期設定は単色（v0.6.6で呼吸から変更）
 #define RGBLIGHT_DEFAULT_HUE  170
 #define RGBLIGHT_DEFAULT_SAT  255
 #define RGBLIGHT_DEFAULT_VAL  100
@@ -109,7 +109,7 @@
 // ため）。よってRGB_MATRIX_FRAMEBUFFER_EFFECTSは不要。
 // 起動時のモードはRGB_MATRIX_DEFAULT_MODEではなくkeyball_apply_normal_led()が
 // kb_led_config（EEPROM保存の独自管理領域）から反映するため、ここでは指定しない。
-// kb_led_configが未初期化(0xFF)の場合はkb_settings.cの既定値（呼吸相当のeffect_id=2）
+// kb_led_configが未初期化(0xFF)の場合はkb_settings.cの既定値（単色のeffect_id=1）
 // が使われる。
 // 最大輝度（消費電力抑制）。2026-10-09: Keyball61でUSBの電源が落ちる（ケーブルのランプが
 // 消える）症状が出たため、LED数に応じて機種ごとに設定（本人指定: 39=150、44=140、61=130。

@@ -450,9 +450,9 @@ kb_led_config_t kb_led_config_get(void) {
         if (buf[0] == 0xFF || all_zero) {
             // 未初期化（AVRは0xFF、RP2040は未書込みが全部0x00）。以前は0xFFしか見ておらず、
             // RP2040では色相・彩度・明るさ・速さが全て0の状態で始まっていた（2026-10-06修正）。
-            // 既定値は呼吸エフェクト、数値はすべて最大（本人希望）。明るさは
-            // RGB_MATRIX_MAXIMUM_BRIGHTNESSで実際には上限に抑えられる。
-            g_led_config = (kb_led_config_t){.effect_id = 2, .hue = 255, .sat = 255, .val = 255, .speed = 255};
+            // 既定値は単色（ソリッド。v0.6.6で呼吸から変更、本人指示 2026-11-18）、数値はすべて最大
+            // （本人希望）。明るさはRGB_MATRIX_MAXIMUM_BRIGHTNESSで実際には上限に抑えられる。
+            g_led_config = (kb_led_config_t){.effect_id = 1, .hue = 255, .sat = 255, .val = 255, .speed = 255};
         } else {
             memcpy(&g_led_config, buf, sizeof(buf));
         }
@@ -885,11 +885,12 @@ void kb_row_order_migrate(void) {
 
 // ── OLEDのアニメーションのON/OFF（kb_settings.h末尾参照）──────────────────────
 bool kb_oled_anim_enabled_get(void) {
-    return eeprom_read_byte((const uint8_t *)(uintptr_t)KB_OLED_ANIM_EEPROM) != KB_OLED_ANIM_OFF_VALUE;
+    // ONを選んだ時だけON。未設定（新しく使い始めた時・EEPROMを初期化した時）はOFF
+    return eeprom_read_byte((const uint8_t *)(uintptr_t)KB_OLED_ANIM_EEPROM) == KB_OLED_ANIM_ON_VALUE;
 }
 
 void kb_oled_anim_enabled_set(bool enabled) {
-    eeprom_update_byte((uint8_t *)(uintptr_t)KB_OLED_ANIM_EEPROM, enabled ? 0x00 : KB_OLED_ANIM_OFF_VALUE);
+    eeprom_update_byte((uint8_t *)(uintptr_t)KB_OLED_ANIM_EEPROM, enabled ? KB_OLED_ANIM_ON_VALUE : KB_OLED_ANIM_OFF_VALUE);
 }
 
 // ── 起動アニメーションのON/OFF（kb_settings.h末尾参照）───────────────────────

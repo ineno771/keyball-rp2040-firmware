@@ -470,9 +470,13 @@ void kb_row_order_mark_done(void);
 void kb_row_order_migrate(void);
 
 // ── OLEDのアニメーション（LEDエフェクト連動）のON/OFF（2026-10-21、v0.5.2）──────────
-// 1バイト。KB_OLED_ANIM_OFF_VALUEの時だけOFF（止まったロゴ）、それ以外（未書込みの0x00/0xFF含む）はON。
+// 1バイト。KB_OLED_ANIM_ON_VALUEの時だけON、それ以外（未書込みの0x00/0xFF含む）はOFF（止まったロゴ）。
+// v0.6.6で初期設定をOFFに変えた（本人指示 2026-11-18）。以前はOFF=0x01・ON=0x00で、RP2040では
+// 未書込みも0x00になり「ONを選んだ」と区別できないため、ONを新しい値0x02にした。
+// そのため、v0.6.5以前でONのまま使っていた人も、更新後はいったんOFFになる。
 #define KB_OLED_ANIM_EEPROM    0x0B10
 #define KB_OLED_ANIM_OFF_VALUE 0x01
+#define KB_OLED_ANIM_ON_VALUE  0x02
 bool kb_oled_anim_enabled_get(void);
 void kb_oled_anim_enabled_set(bool enabled);
 
