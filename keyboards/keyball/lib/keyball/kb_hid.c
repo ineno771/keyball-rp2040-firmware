@@ -868,6 +868,23 @@ void kb_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
+        // 0x3E: すべての設定を初期化する（v0.6.7〜、2026-11-19 本人指示）。
+        // 0x08(RESET_KEYMAP)はキーマップしか戻さないため、Keyball Linkの「すべての設定を初期化する」は
+        // こちらを使う。QMK標準のeeconfig_init()はEEPROM(RP2040はフラッシュ上の疑似EEPROM)を丸ごと消し、
+        // キーマップを既定に戻し、eeconfig_init_user()（並び替え済みの印）まで書き直す。
+        // その後の再起動で、LED・ジェスチャー・OLEDのアニメーションなども新品と同じ初期値で始まる。
+        // 消えるのはUSBを挿している側（親）のEEPROMだけ。反対側は、そちらにUSBを挿して同じ操作をする
+        // （左右間の通信は増やさない方針。本人決定）。左右の判定は基板の配線で決まるので影響しない。
+        // 応答: [cmd, status]（応答を送ってから消去・再起動する）
+        case KB_HID_CMD_FACTORY_RESET: {
+            response[1] = KB_HID_STATUS_OK;
+            raw_hid_send(response, RAW_PACKET_SIZE);
+            wait_ms(100);
+            eeconfig_init();
+            soft_reset_keyboard();
+            return;  // raw_hid_send を二重に呼ばないよう return
+        }
+
         // 0x07: ブートローダーへジャンプ（ファームウェア書き込み用）
         // 応答を送信してから 500ms 後にリセット
         case KB_HID_CMD_REBOOT: {

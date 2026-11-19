@@ -70,6 +70,7 @@
 #define KB_HID_CMD_SET_NAME               0x3B  // レイヤー・ジェスチャーの名前変更（v0.6.0〜）
 #define KB_HID_CMD_GET_GESTURE_OS_ADAPT   0x3C  // 画面切り替えのジェスチャーをOSに合わせるか取得（v0.6.0〜）
 #define KB_HID_CMD_SET_GESTURE_OS_ADAPT   0x3D  // 同 変更
+#define KB_HID_CMD_FACTORY_RESET          0x3E  // すべての設定を初期化（EEPROMを丸ごと消して再起動。v0.6.7〜）
 
 // ステータスコード
 #define KB_HID_STATUS_OK    0x00
