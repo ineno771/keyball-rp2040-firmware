@@ -490,7 +490,7 @@ static bool CHRISTMAS(effect_params_t* params) {
 // CHRISTMAS2（2026-11-24 新規。本人希望「暖色ホワイトのみでクリスマスらしいエフェクト」）。
 // 窓辺のキャンドルの灯りの中を、雪がゆっくり降ってくるイメージ。
 // ・色は暖色ホワイト1色のみ（CHRISTMASと同じ電球色 xmas_rgb[XMAS_WHITE]）
-// ・キャンドル: 全LEDが約30〜50%の明るさで、LEDごとに違うゆらぎ方でほのかに揺れる
+// ・キャンドル: 全LEDが約18〜73%の間で、LEDごとに違うゆらぎ方で揺れる
 //   （ゆっくりした揺れ2つを重ねて、ろうそくの炎のような不規則さを出す。消えない）
 // ・雪: キー裏のLEDの上を、光の粒が上から下へふわふわ左右に揺れながら落ちていく。
 //   粒の近くのLEDほど明るくなる（輪郭は柔らかく、ふわっと明るくなって通り過ぎる）
@@ -584,9 +584,10 @@ static bool CHRISTMAS2(effect_params_t* params) {
 
     for (uint8_t i = led_min; i < led_max; i++) {
         if (i < half_min || i >= half_max) continue;
-        // キャンドル: ゆっくりした揺れ2つを重ねて約30〜50%でほのかに揺らす
-        uint16_t level = 77 + (uint16_t)sin8((uint8_t)(now / 9 + xmas2_off1[i])) * 26 / 255
-                            + (uint16_t)sin8((uint8_t)(now / 4 + xmas2_off2[i])) * 24 / 255;
+        // キャンドル: 揺れ2つ（約2秒のゆっくりした揺れ＋約0.8秒の速い揺れ）を重ねて約18〜73%で揺らす
+        // （本人希望で揺らぎを分かりやすくした: 旧30〜50%・約2.3秒＋約1秒）
+        uint16_t level = 45 + (uint16_t)sin8((uint8_t)(now / 8 + xmas2_off1[i])) * 75 / 255
+                            + (uint16_t)sin8((uint8_t)(now / 3 + xmas2_off2[i])) * 65 / 255;
         // 雪: 近くの粒ほど明るく（距離に応じて滑らかに。いちばん近い粒の分を足す）
         if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
             uint16_t add = 0;
