@@ -216,9 +216,8 @@ static bool KNIGHT(effect_params_t* params) {
     return rgb_matrix_check_finished_leds(led_max);
 }
 
-// CHRISTMAS: 赤と緑を交互に配置し、一定間隔で入れ替える（RGBLIGHT_MODE_CHRISTMASの再現）。
-// 複数色を市松模様に配置し、一定間隔でずらしていく（CHRISTMAS・HALLOWEEN・EASTERの
-// 共通実装）。色数2なら「0→1→0→1…」と交互点灯、3なら3色が順にずれていく。
+// 複数色を市松模様に配置し、一定間隔でずらしていく（HALLOWEEN・EASTERの共通実装。
+// CHRISTMASも以前はこれを使っていたが、2026-11-24に専用の作りに変えた）。色数2なら「0→1→0→1…」と交互点灯、3なら3色が順にずれていく。
 static void render_checkerboard(effect_params_t* params, const uint8_t* hues, uint8_t count, uint16_t* last_tick, uint8_t* phase) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
 
@@ -249,12 +248,142 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
     }
 }
 
+// CHRISTMAS「Classic Christmas」（2026-11-24 本人の仕様で作り直し。以前は赤と緑の市松模様を
+// 一定間隔で入れ替えるだけだった）。クリスマスツリーの電飾をイメージした、落ち着いたイルミネーション。
+// ・色は 深緑#176B45(50%)・暖色ホワイト#FFE4B5(35%)・クリスマスレッド#C83232(15%) の3色だけ
+// ・色の配置はハーフごとに固定（起動のたびに同じ並び）。左右は比率を揃えつつ、並びは別々のランダム
+// ・赤は隣り合って固まらないよう、物理座標で近い位置に置かない
+// ・約70%は常時点灯、約30%（3色すべてから選ぶ）はそれぞれ2〜4秒周期・違うタイミングで、
+//   通常の明るさの30〜100%の間を滑らかに明滅する（完全には消えない）。色は変えず明るさだけ変える
+// ・明るさの基準は設定のVal（最大輝度の制限も効く）。速度・色相・彩度の設定は使わない
+// ・左右の通信は一切増やさない（各ハーフが自分のLEDだけを、自分で決めた並びで光らせる）
+#define XMAS_GREEN 0
+#define XMAS_WHITE 1
+#define XMAS_RED   2
+static const uint8_t xmas_rgb[3][3] = {
+    {0x17, 0x6B, 0x45},  // 深緑
+    {0xFF, 0xE4, 0xB5},  // 暖色ホワイト
+    {0xC8, 0x32, 0x32},  // クリスマスレッド
+};
+static uint8_t  xmas_color[RGB_MATRIX_LED_COUNT];   // LEDごとの色（XMAS_GREEN等）
+static uint16_t xmas_period[RGB_MATRIX_LED_COUNT];  // 明滅の周期(ms)。0なら常時点灯
+static uint16_t xmas_offset[RGB_MATRIX_LED_COUNT];  // 明滅の開始のずれ(ms)
+static bool     xmas_ready = false;
+
+// 決まった種から同じ並びを毎回作るための簡単な乱数（線形合同法）
+static uint32_t xmas_seed;
+static uint16_t xmas_rand(uint16_t n) {
+    xmas_seed = xmas_seed * 1103515245u + 12345u;
+    return (uint16_t)((xmas_seed >> 16) % n);
+}
+
+// 2つのLEDの物理的な距離の2乗（g_led_config.pointの座標）
+static uint16_t xmas_dist2(uint8_t a, uint8_t b) {
+    int16_t dx = (int16_t)g_led_config.point[a].x - g_led_config.point[b].x;
+    int16_t dy = (int16_t)g_led_config.point[a].y - g_led_config.point[b].y;
+    return (uint16_t)(dx * dx + dy * dy);
+}
+
+// 自分のハーフの色の配置と明滅の割り当てを決める（最初の1回だけ）
+static void xmas_setup(uint8_t half_min, uint8_t half_max) {
+    uint8_t n = half_max - half_min;
+    uint8_t order[RGB_MATRIX_LED_COUNT];
+    uint8_t i, j;
+
+    // 左右で別の並びにするため、種をハーフごとに変える（毎回同じ値なので配置は固定）
+    xmas_seed = is_keyboard_left() ? 0x4B21u : 0x9E37u;
+
+    // 並び順をシャッフル
+    for (i = 0; i < n; i++) order[i] = half_min + i;
+    for (i = n - 1; i > 0; i--) {
+        j        = (uint8_t)xmas_rand(i + 1);
+        uint8_t t = order[i];
+        order[i]  = order[j];
+        order[j]  = t;
+    }
+
+    // 隣り合う距離の目安: いちばん近い2つのLEDの距離の1.6倍以内を「隣」とみなす
+    uint16_t nearest = 0xFFFF;
+    for (i = half_min; i < half_max; i++)
+        for (j = i + 1; j < half_max; j++) {
+            uint16_t d = xmas_dist2(i, j);
+            if (d > 0 && d < nearest) nearest = d;
+        }
+    uint16_t adj2 = (uint16_t)((uint32_t)nearest * 256 / 100);  // (1.6倍)^2 = 2.56倍
+
+    uint8_t red_n   = (uint8_t)((n * 15 + 50) / 100);  // 15%
+    uint8_t white_n = (uint8_t)((n * 35 + 50) / 100);  // 35%
+    for (i = half_min; i < half_max; i++) xmas_color[i] = XMAS_GREEN;
+
+    // 赤: シャッフル順に、近くにまだ赤が無いLEDだけを選ぶ。足りなければ条件を外して埋める
+    uint8_t placed = 0;
+    for (uint8_t pass = 0; pass < 2 && placed < red_n; pass++) {
+        for (i = 0; i < n && placed < red_n; i++) {
+            uint8_t idx = order[i];
+            if (xmas_color[idx] != XMAS_GREEN) continue;
+            bool ok = true;
+            if (pass == 0) {
+                for (j = half_min; j < half_max; j++)
+                    if (xmas_color[j] == XMAS_RED && xmas_dist2(idx, j) <= adj2) { ok = false; break; }
+            }
+            if (ok) { xmas_color[idx] = XMAS_RED; placed++; }
+        }
+    }
+    // 暖色ホワイト: 残りから、シャッフル順の後ろ側（赤と違う並び）で選んで散らす
+    placed = 0;
+    for (i = n; i > 0 && placed < white_n; i--) {
+        uint8_t idx = order[i - 1];
+        if (xmas_color[idx] != XMAS_GREEN) continue;
+        xmas_color[idx] = XMAS_WHITE;
+        placed++;
+    }
+
+    // 明滅するLED: 色ごとに約30%ずつ選ぶ（3色すべてが明滅に含まれるようにする）
+    for (i = half_min; i < half_max; i++) xmas_period[i] = 0;
+    for (uint8_t c = 0; c < 3; c++) {
+        uint8_t total = 0;
+        for (i = half_min; i < half_max; i++) if (xmas_color[i] == c) total++;
+        if (total == 0) continue;
+        uint8_t want = (uint8_t)((total * 30 + 50) / 100);
+        if (want == 0) want = 1;
+        uint8_t got = 0;
+        // 乱数で選び、同じLEDを二重に選ばないようにする
+        for (uint8_t tries = 0; got < want && tries < 200; tries++) {
+            uint8_t idx = half_min + (uint8_t)xmas_rand(n);
+            if (xmas_color[idx] != c || xmas_period[idx] != 0) continue;
+            xmas_period[idx] = 2000 + xmas_rand(2001);  // 2〜4秒
+            xmas_offset[idx] = xmas_rand(xmas_period[idx]);
+            got++;
+        }
+    }
+    xmas_ready = true;
+}
+
 static bool CHRISTMAS(effect_params_t* params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
-    static const uint8_t hues[] = {0, 85};  // 赤・緑
-    static uint16_t      last_tick = 0;
-    static uint8_t       phase     = 0;
-    render_checkerboard(params, hues, 2, &last_tick, &phase);
+
+    // 自分のハーフのLEDの範囲（RGB_MATRIX_SPLITと一致。TWINKLEと同じく、
+    // 描画区間(led_min/led_max)ではなくハーフ全体の範囲で配置を決める）
+    static const uint8_t split[2] = RGB_MATRIX_SPLIT;
+    uint8_t half_min = is_keyboard_left() ? 0 : split[0];
+    uint8_t half_max = is_keyboard_left() ? split[0] : RGB_MATRIX_LED_COUNT;
+    if (!xmas_ready) xmas_setup(half_min, half_max);
+
+    uint8_t  val = rgb_matrix_config.hsv.v;  // 通常の明るさ（設定のVal）
+    uint32_t now = timer_read32();
+    for (uint8_t i = led_min; i < led_max; i++) {
+        if (i < half_min || i >= half_max) continue;
+        uint16_t level = 255;  // 明るさの割合（255=通常の明るさ）
+        if (xmas_period[i]) {
+            // 周期の中の位置(0〜255)を、cos波で30%〜100%の滑らかな明滅にする
+            uint8_t  theta = (uint8_t)(((now + xmas_offset[i]) % xmas_period[i]) * 256 / xmas_period[i]);
+            uint8_t  wave  = cos8(theta);                   // 0〜255（255で最も明るい）
+            level          = 77 + (uint16_t)wave * 178 / 255;  // 77(30%)〜255(100%)
+        }
+        uint16_t scale = (uint16_t)val * level / 255;
+        const uint8_t* c = xmas_rgb[xmas_color[i]];
+        rgb_matrix_set_color(i, (uint8_t)((uint16_t)c[0] * scale / 255), (uint8_t)((uint16_t)c[1] * scale / 255), (uint8_t)((uint16_t)c[2] * scale / 255));
+    }
     return rgb_matrix_check_finished_leds(led_max);
 }
 
