@@ -255,7 +255,7 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 //   深緑は暗い青緑、暖色ホワイトは薄い黄色に見えて、クリスマスらしさが出なかった）
 //   深緑 = 青を抜いた濃い緑、暖色ホワイト = 電球色（青をかなり抑えた白）、赤 = ほぼ純粋な赤
 // ・配置はハーフごとに固定（起動のたびに同じ）。左右は比率を揃えて並びは別々。赤は隣り合わせない
-//   ガーランド(緑)55%・白の電球30%・赤の電球15%
+//   ガーランド(緑)40%・白の電球35%・赤の電球25%（本人希望で緑を減らした: 旧55/30/15）
 // ・ガーランドは少し暗め(約45%)にして電球を引き立て、ゆっくり流れる光のうねりを乗せる
 // ・電球は40〜100%の間をそれぞれ違う周期・タイミングで滑らかに明滅（消えない・色は変えない）
 // ・きらめき: 一定間隔でランダムなLEDが一瞬だけ暖色ホワイトに強く光り、すっと戻る
@@ -267,7 +267,7 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 #define XMAS_RED   2
 static const uint8_t xmas_rgb[3][3] = {
     {0x00, 0xC8, 0x1E},  // 深緑（ガーランド）
-    {0xFF, 0x96, 0x32},  // 暖色ホワイト（電球色）
+    {0xFF, 0x6E, 0x14},  // 暖色ホワイト（電球色。本人希望でより暖色寄りに: 96,32→6E,14）
     {0xFF, 0x00, 0x08},  // クリスマスレッド
 };
 static uint8_t  xmas_color[RGB_MATRIX_LED_COUNT];    // LEDごとの色（XMAS_GREEN等）
@@ -317,8 +317,8 @@ static void xmas_setup(uint8_t half_min, uint8_t half_max) {
         }
     uint16_t adj2 = (uint16_t)((uint32_t)nearest * 256 / 100);
 
-    uint8_t red_n   = (uint8_t)((n * 15 + 50) / 100);
-    uint8_t white_n = (uint8_t)((n * 30 + 50) / 100);
+    uint8_t red_n   = (uint8_t)((n * 25 + 50) / 100);
+    uint8_t white_n = (uint8_t)((n * 35 + 50) / 100);
     for (i = half_min; i < half_max; i++) xmas_color[i] = XMAS_GREEN;
 
     // 赤: 近くにまだ赤が無いLEDだけを選ぶ（足りなければ条件を外して埋める）
