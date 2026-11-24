@@ -250,7 +250,7 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 
 // CHRISTMAS（2026-11-24 作り直し。以前は赤と緑の市松模様を一定間隔で入れ替えるだけだった）。
 // クリスマスツリーの電飾のイメージ: 深緑のガーランド（土台）の上に、暖色ホワイトとクリスマスレッドの
-// 電球が並び、電球はそれぞれ違うリズムで明滅、ときどきどこかが「キラッ」と白く光る。
+// 電球が並び、電球はそれぞれ違うリズムで明滅、ときどきどこかが「ふわっ」と白く光る。
 // ・色はLEDで見た時にそれらしく見える値に合わせてある（画面用の色コードをそのまま出すと、
 //   深緑は暗い青緑、暖色ホワイトは薄い黄色に見えて、クリスマスらしさが出なかった）
 //   深緑 = 青を抜いた濃い緑、暖色ホワイト = 電球色（青をかなり抑えた白）、赤 = ほぼ純粋な赤
@@ -258,7 +258,7 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 //   ガーランド(緑)40%・白の電球35%・赤の電球25%（本人希望で緑を減らした: 旧55/30/15）
 // ・ガーランドは少し暗め(約45%)にして電球を引き立て、ゆっくり流れる光のうねりを乗せる
 // ・電球は40〜100%の間をそれぞれ違う周期・タイミングで滑らかに明滅（消えない・色は変えない）
-// ・きらめき: 一定間隔でランダムなLEDが一瞬だけ暖色ホワイトに強く光り、すっと戻る
+// ・きらめき: 一定間隔でランダムなLEDが暖色ホワイトにふわっと明るくなり、ゆっくり戻る
 // ・速度スライダーで明滅とキラッの速さが変わる。彩度を下げると淡い色になる。
 //   明るさの基準は明度（最大輝度の制限も効く）。色相は使わない（色は固定）
 // ・左右の通信は増やさない（各ハーフが自分のLEDだけを、自分で決めた並びで光らせる）
@@ -371,9 +371,9 @@ static bool CHRISTMAS(effect_params_t* params) {
     // 速度: 0で最もゆっくり、255で約2倍速（明滅とキラッの両方）
     uint16_t speed_pct = 100 + (uint16_t)rgb_matrix_config.speed * 100 / 255;  // 100〜200
 
-    // きらめきの発生（ハーフ全体から1つ選ぶ。間隔は速度で 約700〜350ms）
+    // きらめきの発生（ハーフ全体から1つ選ぶ。間隔は速度で 約1000〜500ms）
     if (led_max > led_min) {
-        uint16_t interval = (uint16_t)(70000u / speed_pct);
+        uint16_t interval = (uint16_t)(100000u / speed_pct);
         if (timer_elapsed(xmas_spark_tick) >= interval) {
             xmas_spark_tick = timer_read();
             uint8_t idx     = half_min + (uint8_t)xmas_rand(half_max - half_min);
@@ -385,7 +385,9 @@ static bool CHRISTMAS(effect_params_t* params) {
     uint8_t  val = rgb_matrix_config.hsv.v;  // 明るさの基準（設定の明度）
     uint8_t  sat = rgb_matrix_config.hsv.s;  // 色の濃さ（設定の彩度）
     uint32_t now = timer_read32();
-    const uint16_t SPARK_MS = 600;           // キラッの長さ（すぐ明るくなり、ゆっくり戻る）
+    // ふわっと光る長さ（本人希望で、パッと光る600msから、ゆっくり明るくなって戻る形に変更）
+    // 速度で 約1.8〜0.9秒
+    const uint16_t SPARK_MS = (uint16_t)(180000u / speed_pct);
 
     for (uint8_t i = led_min; i < led_max; i++) {
         if (i < half_min || i >= half_max) continue;
@@ -405,15 +407,14 @@ static bool CHRISTMAS(effect_params_t* params) {
         uint16_t r = xmas_rgb[c][0], g = xmas_rgb[c][1], b = xmas_rgb[c][2];
         r = r * level / 255; g = g * level / 255; b = b * level / 255;
 
-        // キラッ: 暖色ホワイトをいっぱいの明るさで重ねる（最初の15%で立ち上がり、残りで戻る）
+        // ふわっ: 暖色ホワイトを重ねる。cos8で山なりに、ゆっくり明るくなってゆっくり戻る
         if (xmas_spark_on[i]) {
             uint16_t el = timer_elapsed(xmas_spark_at[i]);
             if (el >= SPARK_MS) {
                 xmas_spark_on[i] = false;
             } else {
-                uint16_t k = el < SPARK_MS * 15 / 100 ? (uint32_t)el * 255 / (SPARK_MS * 15 / 100)
-                                                      : (uint32_t)(SPARK_MS - el) * 255 / (SPARK_MS * 85 / 100);
-                if (k > 255) k = 255;
+                uint8_t  ph = (uint8_t)((uint32_t)el * 255 / SPARK_MS);  // 0〜255で1回分
+                uint16_t k  = 255 - cos8(ph);  // 0 → 255(真ん中) → 0 の滑らかな山
                 r = (r * (255 - k) + (uint16_t)xmas_rgb[XMAS_WHITE][0] * k) / 255;
                 g = (g * (255 - k) + (uint16_t)xmas_rgb[XMAS_WHITE][1] * k) / 255;
                 b = (b * (255 - k) + (uint16_t)xmas_rgb[XMAS_WHITE][2] * k) / 255;
