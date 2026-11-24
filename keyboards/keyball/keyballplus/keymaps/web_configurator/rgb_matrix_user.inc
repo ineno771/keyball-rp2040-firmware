@@ -254,8 +254,9 @@ static void render_checkerboard(effect_params_t* params, const uint8_t* hues, ui
 // ・色はLEDで見た時にそれらしく見える値に合わせてある（画面用の色コードをそのまま出すと、
 //   深緑は暗い青緑、暖色ホワイトは薄い黄色に見えて、クリスマスらしさが出なかった）
 //   深緑 = 青を抜いた濃い緑、暖色ホワイト = 電球色（青をかなり抑えた白）、赤 = ほぼ純粋な赤
-// ・配置はハーフごとに固定（起動のたびに同じ）。左右は比率を揃えて並びは別々。赤は隣り合わせない
+// ・配置はハーフごとに固定（起動のたびに同じ）。左右は比率を揃えて並びは別々
 //   ガーランド(緑)40%・白の電球35%・赤の電球25%（本人希望で緑を減らした: 旧55/30/15）
+//   横方向に同じ色がなるべく続かないように並べる（本人希望）。赤・白どうしもなるべく離す
 // ・ガーランドは少し暗め(約45%)にして電球を引き立て、ゆっくり流れる光のうねりを乗せる
 // ・電球は40〜100%の間をそれぞれ違う周期・タイミングで滑らかに明滅（消えない・色は変えない）
 // ・きらめき: 一定間隔でランダムなLEDが暖色ホワイトにふわっと明るくなり、ゆっくり戻る
@@ -292,6 +293,44 @@ static uint16_t xmas_dist2(uint8_t a, uint8_t b) {
     return (uint16_t)(dx * dx + dy * dy);
 }
 
+// 同じ種類のLEDか（キー裏どうし・底面どうし。種類が違うと見える場所が違うので比べない）
+static bool xmas_same_kind(uint8_t a, uint8_t b) {
+    return g_led_config.flags[a] == g_led_config.flags[b];
+}
+// LEDの種類の番号（0=キー裏, 1=底面）
+static uint8_t xmas_kind(uint8_t a) {
+    return (g_led_config.flags[a] & LED_FLAG_UNDERGLOW) ? 1 : 0;
+}
+// 「隣」とみなす距離の2乗（種類ごと。キー裏と底面で間隔が違うので別々に持つ）
+static uint16_t xmas_adj2[2];
+
+// 横に隣り合うLEDか（同じ種類で、近く(xmas_adj2以内)にあり、上下より左右に離れている物。
+// 列ずらし配置で同じ段でも高さが少しずれるので、高さの差が左右の差の半分以下なら横とみなす）
+static bool xmas_hnb(uint8_t a, uint8_t b) {
+    if (!xmas_same_kind(a, b)) return false;
+    int16_t dx = (int16_t)g_led_config.point[a].x - g_led_config.point[b].x;
+    int16_t dy = (int16_t)g_led_config.point[a].y - g_led_config.point[b].y;
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    return dx > 0 && dy * 2 <= dx && xmas_dist2(a, b) <= xmas_adj2[xmas_kind(a)];
+}
+
+// LED a が色 c のときの「よくなさ」（小さいほど良い配置）
+// ・横で同じ色が続く: 10（最優先で避ける。本人希望）
+// ・赤どうし/白どうしが近くに固まる: 赤3・白1
+static uint16_t xmas_cost(uint8_t a, uint8_t c, uint8_t half_min, uint8_t half_max) {
+    uint16_t cost = 0;
+    for (uint8_t j = half_min; j < half_max; j++) {
+        if (j == a || xmas_color[j] != c) continue;
+        if (xmas_hnb(a, j)) {
+            cost += 10;
+        } else if (c != XMAS_GREEN && xmas_same_kind(a, j) && xmas_dist2(a, j) <= xmas_adj2[xmas_kind(a)]) {
+            cost += (c == XMAS_RED) ? 3 : 1;
+        }
+    }
+    return cost;
+}
+
 // 自分のハーフの色の配置と明滅のリズムを決める（最初の1回だけ）
 static void xmas_setup(uint8_t half_min, uint8_t half_max) {
     uint8_t n = half_max - half_min;
@@ -308,46 +347,61 @@ static void xmas_setup(uint8_t half_min, uint8_t half_max) {
         order[j]  = t;
     }
 
-    // 「隣」の目安: いちばん近い2つのLEDの距離の1.6倍以内
-    uint16_t nearest = 0xFFFF;
-    for (i = half_min; i < half_max; i++)
-        for (j = i + 1; j < half_max; j++) {
-            uint16_t d = xmas_dist2(i, j);
-            if (d > 0 && d < nearest) nearest = d;
+    // 「隣」の目安: 種類ごとに、いちばん近い間隔の物の1.6倍以内
+    // （同じ座標の物は除く。底面LEDには異常に近い物があるので、キー間隔の中央付近を使う:
+    //   各LEDのいちばん近い相手までの距離のうち、小さい方から1/4の位置の値を基準にする）
+    for (uint8_t k = 0; k < 2; k++) {
+        uint16_t nd[RGB_MATRIX_LED_COUNT];
+        uint8_t  cnt = 0;
+        for (i = half_min; i < half_max; i++) {
+            if (xmas_kind(i) != k) continue;
+            uint16_t best = 0xFFFF;
+            for (j = half_min; j < half_max; j++) {
+                if (j == i || xmas_kind(j) != k) continue;
+                uint16_t d = xmas_dist2(i, j);
+                if (d > 0 && d < best) best = d;
+            }
+            if (best == 0xFFFF) continue;
+            // 小さい順に並べて入れる（数が少ないので挿入でよい）
+            uint8_t q = cnt++;
+            while (q > 0 && nd[q - 1] > best) { nd[q] = nd[q - 1]; q--; }
+            nd[q] = best;
         }
-    uint16_t adj2 = (uint16_t)((uint32_t)nearest * 256 / 100);
+        uint16_t base = cnt ? nd[cnt / 4] : 0;
+        uint32_t a2   = (uint32_t)base * 256 / 100;
+        xmas_adj2[k]  = a2 > 0xFFFF ? 0xFFFF : (uint16_t)a2;  // 16bitに収める
+    }
 
     uint8_t red_n   = (uint8_t)((n * 25 + 50) / 100);
     uint8_t white_n = (uint8_t)((n * 35 + 50) / 100);
-    for (i = half_min; i < half_max; i++) xmas_color[i] = XMAS_GREEN;
 
-    // 赤: 近くにまだ赤が無いLEDだけを選ぶ（足りなければ条件を外して埋める）
-    uint8_t placed = 0;
-    for (uint8_t pass = 0; pass < 2 && placed < red_n; pass++) {
-        for (i = 0; i < n && placed < red_n; i++) {
-            uint8_t idx = order[i];
-            if (xmas_color[idx] != XMAS_GREEN) continue;
-            bool ok = true;
-            if (pass == 0) {
-                for (j = half_min; j < half_max; j++)
-                    if (xmas_color[j] == XMAS_RED && xmas_dist2(idx, j) <= adj2) { ok = false; break; }
-            }
-            if (ok) { xmas_color[idx] = XMAS_RED; placed++; }
-        }
+    // まず決まった数だけ色を割り当てる（並びはシャッフル済みの順）
+    for (i = 0; i < n; i++) {
+        xmas_color[order[i]] = i < red_n ? XMAS_RED : (i < red_n + white_n ? XMAS_WHITE : XMAS_GREEN);
     }
-    // 白の電球: 残りから、近くにまだ白が無いLEDを優先して散らす
-    placed = 0;
-    for (uint8_t pass = 0; pass < 2 && placed < white_n; pass++) {
-        for (i = n; i > 0 && placed < white_n; i--) {
-            uint8_t idx = order[i - 1];
-            if (xmas_color[idx] != XMAS_GREEN) continue;
-            bool ok = true;
-            if (pass == 0) {
-                for (j = half_min; j < half_max; j++)
-                    if (xmas_color[j] == XMAS_WHITE && xmas_dist2(idx, j) <= adj2) { ok = false; break; }
+    // 次に、2つのLEDの色を入れ替えて「よくなさ」が減るなら入れ替える、を繰り返す
+    // （色の数の割合は変わらない。改善が無くなるか一定回数で終了。起動時に1回だけ）
+    for (uint8_t round = 0; round < 8; round++) {
+        bool improved = false;
+        for (i = 0; i < n; i++) {
+            uint8_t a = order[i];
+            for (j = i + 1; j < n; j++) {
+                uint8_t b  = order[j];
+                uint8_t ca = xmas_color[a], cb = xmas_color[b];
+                if (ca == cb) continue;
+                uint16_t before = xmas_cost(a, ca, half_min, half_max) + xmas_cost(b, cb, half_min, half_max);
+                xmas_color[a] = cb;
+                xmas_color[b] = ca;
+                uint16_t after = xmas_cost(a, cb, half_min, half_max) + xmas_cost(b, ca, half_min, half_max);
+                if (after < before) {
+                    improved = true;
+                } else {
+                    xmas_color[a] = ca;  // 良くならなければ元に戻す
+                    xmas_color[b] = cb;
+                }
             }
-            if (ok) { xmas_color[idx] = XMAS_WHITE; placed++; }
         }
+        if (!improved) break;
     }
     // 電球ごとの明滅のリズム（周期1.2〜2.8秒の基準値・開始のずれ）
     for (i = half_min; i < half_max; i++) {
