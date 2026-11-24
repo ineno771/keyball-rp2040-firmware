@@ -72,6 +72,10 @@ RGB_MATRIX_EFFECT(TRACKBALL_BREATH)
 RGB_MATRIX_EFFECT(BOOT_WAIT)
 RGB_MATRIX_EFFECT(BOOT_SPREAD)
 
+// CHRISTMAS2: 暖色ホワイトだけのクリスマス（キャンドルの灯り＋雪。2026-11-24〜）。
+// 既存のモード番号がずれないよう、いちばん最後に追加している（保存済みの設定を守るため）
+RGB_MATRIX_EFFECT(CHRISTMAS2)
+
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 
 // keymap.cで定義。ボールが物理的に左手側にあるか（左手ボールで調整済みの表のため、右手ボールの時に左右を反転する）
@@ -474,6 +478,136 @@ static bool CHRISTMAS(effect_params_t* params) {
             }
         }
         // 彩度: 設定の彩度を下げるほど、いちばん明るい色の成分に近づけて白っぽい淡い色にする
+        uint16_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        r = mx - (mx - r) * sat / 255;
+        g = mx - (mx - g) * sat / 255;
+        b = mx - (mx - b) * sat / 255;
+        rgb_matrix_set_color(i, (uint8_t)(r * val / 255), (uint8_t)(g * val / 255), (uint8_t)(b * val / 255));
+    }
+    return rgb_matrix_check_finished_leds(led_max);
+}
+
+// CHRISTMAS2（2026-11-24 新規。本人希望「暖色ホワイトのみでクリスマスらしいエフェクト」）。
+// 窓辺のキャンドルの灯りの中を、雪がゆっくり降ってくるイメージ。
+// ・色は暖色ホワイト1色のみ（CHRISTMASと同じ電球色 xmas_rgb[XMAS_WHITE]）
+// ・キャンドル: 全LEDが約30〜50%の明るさで、LEDごとに違うゆらぎ方でほのかに揺れる
+//   （ゆっくりした揺れ2つを重ねて、ろうそくの炎のような不規則さを出す。消えない）
+// ・雪: キー裏のLEDの上を、光の粒が上から下へふわふわ左右に揺れながら落ちていく。
+//   粒の近くのLEDほど明るくなる（輪郭は柔らかく、ふわっと明るくなって通り過ぎる）
+//   底面LED(アンダーグロー)は雪を乗せず、キャンドルの灯りのみ
+// ・速度スライダーで雪の落ちる速さと降る量、キャンドルの揺れの速さが変わる。
+//   彩度を下げると白っぽくなる。明るさの基準は明度。色相は使わない（色は固定）
+// ・左右の通信は増やさない（各ハーフが自分のLEDだけで雪を降らせる）
+// ・OLEDのアニメーションはクリスマスと同じ（keymap.c）
+#define XMAS2_FLAKES 4  // 1ハーフで同時に降る雪の数の上限
+typedef struct {
+    bool     on;
+    int16_t  x0;     // 落ち始めの横位置
+    uint16_t start;  // 落ち始めた時刻
+    uint8_t  v;      // 落ちる速さ（座標/秒の基準値）
+    uint8_t  phase;  // 左右の揺れの位相
+} xmas2_flake_t;
+static xmas2_flake_t xmas2_flake[XMAS2_FLAKES];
+static uint8_t  xmas2_off1[RGB_MATRIX_LED_COUNT];  // キャンドルの揺れのずれ（LEDごと）
+static uint8_t  xmas2_off2[RGB_MATRIX_LED_COUNT];
+static bool     xmas2_ready = false;
+static int16_t  xmas2_xmin, xmas2_xmax, xmas2_ymin, xmas2_ymax;  // 自分のハーフのキーの範囲
+static uint16_t xmas2_spawn_tick = 0;
+
+static bool CHRISTMAS2(effect_params_t* params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+
+    // 自分のハーフのLEDの範囲（RGB_MATRIX_SPLITと一致。CHRISTMASと同じ考え方）
+    static const uint8_t split[2] = RGB_MATRIX_SPLIT;
+    uint8_t half_min = is_keyboard_left() ? 0 : split[0];
+    uint8_t half_max = is_keyboard_left() ? split[0] : RGB_MATRIX_LED_COUNT;
+
+    if (!xmas2_ready) {
+        // 最初の1回だけ: キーの範囲とキャンドルの揺れのずれを決める
+        xmas_seed  = timer_read32() ^ (is_keyboard_left() ? 0x51A7u : 0xC3E9u);
+        xmas2_xmin = 255; xmas2_xmax = 0; xmas2_ymin = 255; xmas2_ymax = 0;
+        for (uint8_t i = half_min; i < half_max; i++) {
+            xmas2_off1[i] = (uint8_t)xmas_rand(256);
+            xmas2_off2[i] = (uint8_t)xmas_rand(256);
+            if (g_led_config.flags[i] & LED_FLAG_UNDERGLOW) continue;
+            int16_t x = g_led_config.point[i].x, y = g_led_config.point[i].y;
+            if (x < xmas2_xmin) xmas2_xmin = x;
+            if (x > xmas2_xmax) xmas2_xmax = x;
+            if (y < xmas2_ymin) xmas2_ymin = y;
+            if (y > xmas2_ymax) xmas2_ymax = y;
+        }
+        for (uint8_t f = 0; f < XMAS2_FLAKES; f++) xmas2_flake[f].on = false;
+        xmas2_ready = true;
+    }
+
+    // 速度: 0で最もゆっくり、255で約2倍速
+    uint16_t speed_pct = 100 + (uint16_t)rgb_matrix_config.speed * 100 / 255;  // 100〜200
+    const int16_t R    = 16;          // 雪の粒の光の広がり（半径、座標単位）
+    const int16_t R2   = R * R;
+
+    // 雪の発生（間隔は速度で 約1.4〜0.7秒。空きが無ければ見送り）
+    if (led_max > led_min && timer_elapsed(xmas2_spawn_tick) >= (uint16_t)(140000u / speed_pct)) {
+        xmas2_spawn_tick = timer_read();
+        for (uint8_t f = 0; f < XMAS2_FLAKES; f++) {
+            if (xmas2_flake[f].on) continue;
+            xmas2_flake[f].on    = true;
+            xmas2_flake[f].x0    = xmas2_xmin + (int16_t)xmas_rand((uint16_t)(xmas2_xmax - xmas2_xmin + 1));
+            xmas2_flake[f].start = timer_read();
+            xmas2_flake[f].v     = 14 + (uint8_t)xmas_rand(8);  // 14〜21（粒ごとに少し違う速さ）
+            xmas2_flake[f].phase = (uint8_t)xmas_rand(256);
+            break;
+        }
+    }
+
+    // 今の雪の位置を計算（時刻から求めるので、描画区間が分かれていても同じ位置になる）
+    int16_t fx[XMAS2_FLAKES], fy[XMAS2_FLAKES];
+    bool    fon[XMAS2_FLAKES];
+    for (uint8_t f = 0; f < XMAS2_FLAKES; f++) {
+        fon[f] = false;
+        if (!xmas2_flake[f].on) continue;
+        uint32_t el = timer_elapsed(xmas2_flake[f].start);
+        int32_t  y  = (int32_t)xmas2_ymin - R + (int32_t)(el * xmas2_flake[f].v * speed_pct / 100 / 1000);
+        if (y > xmas2_ymax + R) {
+            xmas2_flake[f].on = false;  // 下まで落ちきったら終わり
+            continue;
+        }
+        // 左右にふわふわ揺れる（±6）
+        uint8_t sway = (uint8_t)(xmas2_flake[f].phase + (uint8_t)(y * 3));
+        fx[f]  = xmas2_flake[f].x0 + ((int16_t)sin8(sway) - 128) * 6 / 128;
+        fy[f]  = (int16_t)y;
+        fon[f] = true;
+    }
+
+    uint8_t  val = rgb_matrix_config.hsv.v;  // 明るさの基準（設定の明度）
+    uint8_t  sat = rgb_matrix_config.hsv.s;  // 色の濃さ（設定の彩度）
+    uint32_t now = (uint32_t)((uint64_t)timer_read32() * speed_pct / 100);  // 64bitで計算して桁あふれを防ぐ
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        if (i < half_min || i >= half_max) continue;
+        // キャンドル: ゆっくりした揺れ2つを重ねて約30〜50%でほのかに揺らす
+        uint16_t level = 77 + (uint16_t)sin8((uint8_t)(now / 9 + xmas2_off1[i])) * 26 / 255
+                            + (uint16_t)sin8((uint8_t)(now / 4 + xmas2_off2[i])) * 24 / 255;
+        // 雪: 近くの粒ほど明るく（距離に応じて滑らかに。いちばん近い粒の分を足す）
+        if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
+            uint16_t add = 0;
+            for (uint8_t f = 0; f < XMAS2_FLAKES; f++) {
+                if (!fon[f]) continue;
+                int16_t dx = g_led_config.point[i].x - fx[f];
+                int16_t dy = g_led_config.point[i].y - fy[f];
+                if (dx > R || dx < -R || dy > R || dy < -R) continue;
+                int16_t d2 = dx * dx + dy * dy;
+                if (d2 >= R2) continue;
+                uint16_t t = (uint16_t)((uint32_t)(R2 - d2) * 255 / R2);  // 中心255〜外側0
+                uint16_t k = t * t / 255;                                 // 輪郭を柔らかく
+                if (k > add) add = k;
+            }
+            level += (uint32_t)(255 - level) * add / 255;
+        }
+
+        uint16_t r = (uint16_t)xmas_rgb[XMAS_WHITE][0] * level / 255;
+        uint16_t g = (uint16_t)xmas_rgb[XMAS_WHITE][1] * level / 255;
+        uint16_t b = (uint16_t)xmas_rgb[XMAS_WHITE][2] * level / 255;
+        // 彩度: 下げるほど白っぽくする（CHRISTMASと同じ方法）
         uint16_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
         r = mx - (mx - r) * sat / 255;
         g = mx - (mx - g) * sat / 255;

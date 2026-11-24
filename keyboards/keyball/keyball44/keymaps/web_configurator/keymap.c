@@ -917,6 +917,8 @@ void oledkit_render_logo_user(void) {
     // Keyball LinkでOLEDのアニメーションをOFFにした時は、どのエフェクトでも止まったロゴにする（v0.5.2〜）
     switch (keyball.oled_anim_off ? RGB_MATRIX_NONE : rgb_matrix_get_mode()) {
         case RGB_MATRIX_CUSTOM_CHRISTMAS: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
+        // クリスマス2もOLEDはクリスマスと同じアニメーション（本人希望）
+        case RGB_MATRIX_CUSTOM_CHRISTMAS2: render_seasonal_anim_oled(&anim_xmas); handled = true; break;
         case RGB_MATRIX_CUSTOM_HALLOWEEN: render_seasonal_anim_oled(&anim_hallow); handled = true; break;
         case RGB_MATRIX_CUSTOM_EASTER: render_seasonal_anim_oled(&anim_easter); handled = true; break;
         case RGB_MATRIX_CUSTOM_TWINKLE: render_seasonal_anim_oled(&anim_twinkle); handled = true; break;

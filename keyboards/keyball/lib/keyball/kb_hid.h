@@ -136,7 +136,7 @@ void kb_led_config_sync_from_rgb_matrix(void);
 //   設定でkeyball_gesture_wave_task()が切り替える（2026-09-29〜）。
 #define KB_LED_EFFECT_HALLOWEEN      11
 #define KB_LED_EFFECT_EASTER         13
-#define KB_LED_EFFECT_TOTAL_COUNT    20  // 有効なeffect_idの総数（0-19。6・10・12は欠番）
+#define KB_LED_EFFECT_TOTAL_COUNT    21  // 有効なeffect_idの総数（0-20。6・10・12は欠番。20=クリスマス2）
 bool kb_hid_led_effect_is_seasonal(uint8_t effect_id);
 #endif
 

@@ -90,6 +90,8 @@ uint8_t kb_hid_led_effect_count(void) {
 // トラックボールブリージングウェーブ。TRACKBALL(16)と同じくGESTURE_ENABLE不要で、
 // RGB_MATRIX_CUSTOM_USERがあれば常に選択できる（RP2040版のみ。2026-09-29〜）。
 #define LED_EFFECT_ID_TRACKBALL_BREATH 19
+// クリスマス2（暖色ホワイトだけのキャンドル＋雪。v0.6.8〜）。OLEDはクリスマスと同じ
+#define LED_EFFECT_ID_CHRISTMAS2      20
 #ifdef RGB_MATRIX_CUSTOM_USER
 static const uint8_t RGB_MATRIX_LED_EFFECT_MAP[RGB_MATRIX_LED_EFFECT_COUNT] = {
     RGB_MATRIX_NONE,               //  0: オフ
@@ -126,6 +128,7 @@ uint8_t kb_hid_led_effect_to_rgb_matrix_mode(uint8_t effect_id) {
     if (effect_id == LED_EFFECT_ID_TRACKBALL) return RGB_MATRIX_CUSTOM_TRACKBALL;
     if (effect_id == LED_EFFECT_ID_RIPPLE) return RGB_MATRIX_CUSTOM_RIPPLE;
     if (effect_id == LED_EFFECT_ID_TRACKBALL_BREATH) return RGB_MATRIX_CUSTOM_TRACKBALL_BREATH;
+    if (effect_id == LED_EFFECT_ID_CHRISTMAS2) return RGB_MATRIX_CUSTOM_CHRISTMAS2;
 #ifdef GESTURE_ENABLE
     if (effect_id == LED_EFFECT_ID_GESTURE_WAVE) return RGB_MATRIX_CUSTOM_GESTURE_WAVE;
 #endif
@@ -188,6 +191,8 @@ void kb_led_config_sync_from_rgb_matrix(void) {
             effect_id = LED_EFFECT_ID_RIPPLE;
         } else if (mode == RGB_MATRIX_CUSTOM_TRACKBALL_BREATH) {
             effect_id = LED_EFFECT_ID_TRACKBALL_BREATH;
+        } else if (mode == RGB_MATRIX_CUSTOM_CHRISTMAS2) {
+            effect_id = LED_EFFECT_ID_CHRISTMAS2;
         }
 #ifdef GESTURE_ENABLE
         else if (mode == RGB_MATRIX_CUSTOM_GESTURE_WAVE) {
