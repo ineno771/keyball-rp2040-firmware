@@ -491,12 +491,12 @@ static bool CHRISTMAS(effect_params_t* params) {
 // CHRISTMAS2（2026-11-24 新規。本人希望「暖色ホワイトのみでクリスマスらしいエフェクト」）。
 // 窓辺のキャンドルの灯りの中を、雪がゆっくり降ってくるイメージ。
 // ・色は暖色ホワイト1色のみ（CHRISTMASと同じ電球色 xmas_rgb[XMAS_WHITE]）
-// ・キャンドル: 全LEDが約18〜73%の間で、LEDごとに違うゆらぎ方で揺れる
+// ・キャンドル: 全LEDが約25〜60%の間で、LEDごとに違うゆらぎ方でゆっくり揺れる
 //   （ゆっくりした揺れ2つを重ねて、ろうそくの炎のような不規則さを出す。消えない）
 // ・雪: キー裏のLEDの上を、光の粒が上から下へふわふわ左右に揺れながら落ちていく。
 //   粒の近くのLEDほど明るくなる（輪郭は柔らかく、ふわっと明るくなって通り過ぎる）
 //   底面LED(アンダーグロー)は雪を乗せず、キャンドルの灯りのみ
-// ・速度スライダーで雪の落ちる速さと降る量、キャンドルの揺れの速さが変わる。
+// ・速度スライダーで雪の落ちる速さと降る量、キャンドルの揺れの速さが変わる（全体にゆっくりめ）。
 //   彩度を下げると白っぽくなる。明るさの基準は明度。色相は使わない（色は固定）
 // ・左右の通信は増やさない（各ハーフが自分のLEDだけで雪を降らせる）
 // ・OLEDのアニメーションはクリスマスと同じ（keymap.c）
@@ -541,12 +541,12 @@ static bool CHRISTMAS2(effect_params_t* params) {
         xmas2_ready = true;
     }
 
-    // 速度: 0で最もゆっくり、255で約2倍速
-    uint16_t speed_pct = 100 + (uint16_t)rgb_matrix_config.speed * 100 / 255;  // 100〜200
+    // 速度: 0で最もゆっくり、255で約2倍速。本人希望で全体を遅くした（旧100〜200%→50〜100%）
+    uint16_t speed_pct = 50 + (uint16_t)rgb_matrix_config.speed * 50 / 255;  // 50〜100
     const int16_t R    = 16;          // 雪の粒の光の広がり（半径、座標単位）
     const int16_t R2   = R * R;
 
-    // 雪の発生（間隔は速度で 約1.4〜0.7秒。空きが無ければ見送り）
+    // 雪の発生（間隔は速度で 約2.8〜1.4秒。空きが無ければ見送り）
     if (led_max > led_min && timer_elapsed(xmas2_spawn_tick) >= (uint16_t)(140000u / speed_pct)) {
         xmas2_spawn_tick = timer_read();
         for (uint8_t f = 0; f < XMAS2_FLAKES; f++) {
@@ -585,10 +585,12 @@ static bool CHRISTMAS2(effect_params_t* params) {
 
     for (uint8_t i = led_min; i < led_max; i++) {
         if (i < half_min || i >= half_max) continue;
-        // キャンドル: 揺れ2つ（約2秒のゆっくりした揺れ＋約0.8秒の速い揺れ）を重ねて約18〜73%で揺らす
-        // （本人希望で揺らぎを分かりやすくした: 旧30〜50%・約2.3秒＋約1秒）
-        uint16_t level = 45 + (uint16_t)sin8((uint8_t)(now / 8 + xmas2_off1[i])) * 75 / 255
-                            + (uint16_t)sin8((uint8_t)(now / 3 + xmas2_off2[i])) * 65 / 255;
+        // キャンドル: 揺れ2つ（ゆっくりした揺れ＋少し速い揺れ）を重ねて約25〜60%で揺らす
+        // 1周の長さは速度最大で約3.1秒＋約1.3秒、最小で約6.1秒＋約2.6秒
+        // （本人希望: 最初の30〜50%から揺らぎを分かりやすくしたが、18〜73%・速さは大きすぎ/
+        //   早すぎたため、幅は少しだけ広げる程度に、速さは遅くした）
+        uint16_t level = 64 + (uint16_t)sin8((uint8_t)(now / 12 + xmas2_off1[i])) * 45 / 255
+                            + (uint16_t)sin8((uint8_t)(now / 5 + xmas2_off2[i])) * 44 / 255;
         // 雪: 近くの粒ほど明るく（距離に応じて滑らかに。いちばん近い粒の分を足す）
         if (!(g_led_config.flags[i] & LED_FLAG_UNDERGLOW)) {
             uint16_t add = 0;
