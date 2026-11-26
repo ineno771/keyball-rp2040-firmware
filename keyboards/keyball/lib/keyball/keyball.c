@@ -1606,6 +1606,13 @@ void housekeeping_task_kb(void) {
         led_resync_task();
         if (keyball.that_have_ball) {
             rpc_get_motion_invoke();
+        }
+        // CPIの送信にはOLEDアニメ・起動演出のON/OFFも相乗りしているため、反対側にボールが
+        // 無くても送る（2026-11-26修正。以前はボールのある側にだけ送っていたため、ボールの
+        // ある側にUSBを挿すと、ボールの無い側へON/OFFが届かず切り替わらなかった）。
+        // 反対側と通信が成立してから（that_enable）だけにし、片側だけの時に試し続けない。
+        // 送るのは設定が変わった時と起動時だけで、定期的な通信は増えない。
+        if (keyball.that_enable) {
             rpc_set_cpi_invoke();
         }
 #ifdef GESTURE_ENABLE
